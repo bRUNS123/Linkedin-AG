@@ -2,61 +2,15 @@ import json
 import re
 import os
 import time
-import google.generativeai as genai
 
-# Setup Gemini AI
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    # Configure the model
-    generation_config = {
-        "temperature": 0.1,
-        "top_p": 0.95,
-        "top_k": 40,
-        "max_output_tokens": 8192,
-        "response_mime_type": "application/json",
-    }
-    ai_model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        generation_config=generation_config,
-    )
-else:
-    ai_model = None
-
-def analyze_with_ai(text):
-    """
-    Llama a Gemini para validar si el texto es realmente una oferta laboral
-    y extraer datos clave como rol y empresa.
-    """
-    if not ai_model:
-        return None
-        
-    prompt = f"""
-    Eres un experto analista de reclutamiento. Lee la siguiente publicación de LinkedIn.
-    Tu objetivo es determinar SI ES UNA OFERTA DE TRABAJO (alguien contratando) 
-    O SI ES ALGUIEN BUSCANDO EMPLEO (no es una oferta).
-    
-    Además, detecta si es una oferta relacionada a INGENIERIA CIVIL ESTRUCTURAL (cálculo estructural, modelado estructural, revisor estructural, revisor sismico, dibujante estructural).
-    
-    Publicación:
-    \"\"\"{text}\"\"\"
-    
-    Responde ÚNICAMENTE con un objeto JSON válido con la siguiente estructura exacta:
-    {{
-      "is_offer": booleano (true si es una empresa/persona publicando una vacante real, false si es alguien buscando trabajo o publicidad),
-      "is_structural": booleano (true si el puesto es de ingeniería civil estructural, calculista, o dibujante estructural),
-      "role": "Nombre del cargo ofrecido o null si no se detecta",
-      "company": "Nombre de la empresa que contrata o null si no se detecta"
-    }}
-    """
-    try:
-        response = ai_model.generate_content(prompt)
-        # Parse json
-        result = json.loads(response.text)
-        return result
-    except Exception as e:
-        print(f"Error AI: {e}")
-        return None
+try:
+    import spacy
+    # Intentar cargar el modelo en español
+    nlp = spacy.load("es_core_news_sm")
+    print("LOG: Modelo de lenguaje local cargado correctamente (spaCy).")
+except Exception as e:
+    print(f"WARN: No se pudo cargar spaCy o el modelo es_core_news_sm: {e}")
+    nlp = None
 
 def normalize_text(text):
     """Normaliza texto: minúsculas, sin acentos"""
@@ -158,20 +112,40 @@ def detect_job_offer(text, keywords, user_vote=None):
     ai_company = None
     used_ai = False
 
-    # INTEGRACIÓN DE GEMINI AI (Pre-filtro: solo enviar si final_score > 0.15)
-    if final_score > 0.15 and ai_model:
-        ai_prediction = analyze_with_ai(text)
-        if ai_prediction:
-            used_ai = True
-            is_offer = ai_prediction.get("is_offer", is_offer)
-            is_structural = ai_prediction.get("is_structural", is_structural)
-            ai_role = ai_prediction.get("role")
-            ai_company = ai_prediction.get("company")
-            # Ajustar score visual basado en la certeza de la IA
-            final_score = 0.95 if is_offer else 0.05
+    # INTEGRACIÓN DE SPACY NLP (Local y Gratuito)
+    if final_score > 0.15 and nlp:
+        try:
+            doc = nlp(text_norm)
+            is_first_person_seeking = False
+            is_hiring = False
             
-            # Rate limiting prevention para capa gratuita
-            time.sleep(4.5)
+            for token in doc:
+                if token.lemma_ in ["buscar", "requerir", "necesitar", "querer", "ofrecer"]:
+                    morph = token.morph.to_dict()
+                    person = morph.get("Person", "")
+                    number = morph.get("Number", "")
+                    
+                    if person == "1" and number == "Sing":
+                        # "busco", "necesito" -> Persona buscando empleo
+                        is_first_person_seeking = True
+                    elif person == "1" and number == "Plur":
+                        # "buscamos", "necesitamos" -> Empresa contratando
+                        is_hiring = True
+                    elif person == "3":
+                        # "busca", "se busca", "requiere" -> Empresa contratando
+                        is_hiring = True
+            
+            if is_first_person_seeking and not is_hiring:
+                final_score = 0.05
+                is_offer = False
+                used_ai = True
+            elif is_hiring:
+                final_score = 0.95
+                is_offer = True
+                used_ai = True
+                
+        except Exception as e:
+            pass
 
     # Detección de Emails - Regex profesional robusto
     email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
