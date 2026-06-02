@@ -31,7 +31,9 @@ from playwright._impl._errors import TargetClosedError
 
 # --- Modulos locales ---
 from process_locations import find_locations_in_text
+from process_locations import find_locations_in_text
 from detect_jobs import detect_job_offer
+import train_model
 
 # ===================== CONFIGURACION =====================
 
@@ -817,6 +819,12 @@ class DashboardApp:
                                relief="flat", padx=18, pady=6, cursor="hand2",
                                command=self._on_stop, state=DISABLED)
         self.btn_stop.pack(side=LEFT, padx=3)
+        
+        self.btn_train = Button(btn_frame, text="🧠 ENTRENAR BOT", font=("Segoe UI", 11, "bold"),
+                               bg="#9c27b0", fg="white", activebackground="#ba68c8",
+                               relief="flat", padx=18, pady=6, cursor="hand2",
+                               command=self._open_training_window)
+        self.btn_train.pack(side=LEFT, padx=3)
 
         # Separador
         Frame(ctrl, bg=COLORS["border"], width=2).pack(side=LEFT, fill=Y, padx=14)
@@ -928,6 +936,12 @@ class DashboardApp:
             time.sleep(1)
         self.root.destroy()
 
+    def _show_data_viewer(self, title, csv_file):
+        DataViewer(self.root, title, csv_file)
+
+    def _open_training_window(self):
+        FeedbackWindow(self.root)
+
     # --- Actualizaciones ---
     def _on_stats_update(self, stats):
         # Llamado desde el hilo del engine, programar en el hilo principal
@@ -1016,12 +1030,12 @@ class DashboardApp:
         
         self._append_log(f"[SISTEMA] Panel de control listo. {len(posts)} posts en base de datos.\n", "info")
 
-    def _show_data_viewer(self, title, csv_file):
-        if not os.path.exists(csv_file):
-            messagebox.showinfo("Sin datos", f"El archivo {csv_file} aun no existe o esta vacio.")
-            return
 
-        top = Toplevel(self.root)
+# ===================== VISOR DE DATOS =====================
+
+class DataViewer:
+    def __init__(self, parent, title, csv_file):
+        top = Toplevel(parent)
         top.title(f"Visor de Datos - {title}")
         top.geometry("1100x600")
         top.configure(bg=COLORS["bg"])
@@ -1045,9 +1059,10 @@ class DashboardApp:
         scroll_x.config(command=tree.xview)
 
         # Style treeview for dark theme
-        self.style.configure("Treeview", background="#0d1117", foreground=COLORS["text_bright"],
+        s = ttk.Style()
+        s.configure("Treeview", background="#0d1117", foreground=COLORS["text_bright"],
                              fieldbackground="#0d1117", rowheight=30)
-        self.style.map("Treeview", background=[("selected", COLORS["accent_blue"])])
+        s.map("Treeview", background=[("selected", COLORS["accent_blue"])])
 
         try:
             with open(csv_file, 'r', encoding='utf-8') as f:
@@ -1080,6 +1095,133 @@ class DashboardApp:
                     tree.insert("", END, values=clean_row)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar {csv_file}\n{e}")
+
+# ===================== MÓDULO DE FEEDBACK (ENTRENAMIENTO) =====================
+
+class FeedbackWindow:
+    def __init__(self, parent):
+        self.top = Toplevel(parent)
+        self.top.title("Tinder de Empleos - Entrenamiento")
+        self.top.geometry("800x600")
+        self.top.configure(bg=COLORS["bg"])
+        self.top.grab_set()
+
+        self.posts_to_review = []
+        self.current_idx = 0
+        self.training_data = []
+
+        self._load_data()
+        self._build_ui()
+        self._show_post()
+
+        self.top.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _load_data(self):
+        # Cargar posts extraidos
+        extracted = load_json(LOCATIONS_FILE, [])
+        # Cargar datos de entrenamiento
+        self.training_data = load_json(TRAINING_FILE, [])
+
+        # Crear conjunto de posts ya votados para ignorarlos
+        voted_keys = set()
+        for t in self.training_data:
+            key = f"{t.get('author', '')}|{t.get('text', '')[:50]}"
+            voted_keys.add(key)
+
+        # Filtrar posts que no tienen voto
+        for p in extracted:
+            key = f"{p.get('author', '')}|{p.get('text', '')[:50]}"
+            if key not in voted_keys:
+                self.posts_to_review.append(p)
+
+    def _build_ui(self):
+        hdr = Frame(self.top, bg=COLORS["bg"], pady=10)
+        hdr.pack(fill=X)
+        self.lbl_counter = Label(hdr, text="", font=("Segoe UI", 12), bg=COLORS["bg"], fg=COLORS["text_dim"])
+        self.lbl_counter.pack()
+
+        # Text area
+        text_frame = Frame(self.top, bg=COLORS["bg_card"], padx=20, pady=20)
+        text_frame.pack(fill=BOTH, expand=True, padx=20, pady=10)
+
+        self.lbl_author = Label(text_frame, text="", font=("Segoe UI", 14, "bold"), bg=COLORS["bg_card"], fg=COLORS["accent_blue"])
+        self.lbl_author.pack(anchor=W)
+
+        self.txt_content = Text(text_frame, font=("Segoe UI", 12), bg=COLORS["bg_card"], fg=COLORS["text_bright"], 
+                                wrap=WORD, relief="flat", height=15)
+        self.txt_content.pack(fill=BOTH, expand=True, pady=(10, 0))
+        self.txt_content.config(state=DISABLED)
+
+        # Botones
+        btn_frame = Frame(self.top, bg=COLORS["bg"], pady=20)
+        btn_frame.pack(fill=X)
+
+        btn_no = Button(btn_frame, text="❌ NO ES OFERTA", font=("Segoe UI", 14, "bold"),
+                        bg="#ff1744", fg="white", activebackground="#ff5252",
+                        padx=30, pady=15, cursor="hand2", command=lambda: self._vote(False))
+        btn_no.pack(side=LEFT, expand=True)
+
+        btn_yes = Button(btn_frame, text="✅ SÍ ES OFERTA", font=("Segoe UI", 14, "bold"),
+                         bg="#00c853", fg="white", activebackground="#00e676",
+                         padx=30, pady=15, cursor="hand2", command=lambda: self._vote(True))
+        btn_yes.pack(side=RIGHT, expand=True)
+
+    def _show_post(self):
+        if self.current_idx >= len(self.posts_to_review):
+            self.lbl_counter.config(text="¡Felicidades! No hay más posts por revisar.")
+            self.lbl_author.config(text="Fin de la revisión")
+            self.txt_content.config(state=NORMAL)
+            self.txt_content.delete("1.0", END)
+            self.txt_content.insert(END, "Has revisado todos los posts nuevos.\nPuedes cerrar esta ventana para que el bot empiece a aprender de tus respuestas.")
+            self.txt_content.config(state=DISABLED)
+            return
+
+        post = self.posts_to_review[self.current_idx]
+        total = len(self.posts_to_review)
+        self.lbl_counter.config(text=f"Revisando {self.current_idx + 1} de {total}")
+        
+        self.lbl_author.config(text=post.get('author', 'Autor Desconocido'))
+        
+        self.txt_content.config(state=NORMAL)
+        self.txt_content.delete("1.0", END)
+        self.txt_content.insert(END, post.get('text', ''))
+        self.txt_content.config(state=DISABLED)
+
+    def _vote(self, is_offer):
+        if self.current_idx >= len(self.posts_to_review):
+            return
+
+        post = self.posts_to_review[self.current_idx]
+        
+        # Formato de training_data
+        vote_entry = {
+            "author": post.get("author", ""),
+            "text": post.get("text", ""),
+            "is_offer": is_offer,
+            "votes": {
+                "yes": 1 if is_offer else 0,
+                "no": 1 if not is_offer else 0
+            }
+        }
+        self.training_data.append(vote_entry)
+        
+        # Avanzar
+        self.current_idx += 1
+        self._show_post()
+
+    def _on_close(self):
+        # Guardar si hubieron cambios
+        save_json(self.training_data, TRAINING_FILE)
+        
+        # Llamar silenciosamente a train_model
+        try:
+            print("[FEEDBACK] Iniciando auto-entrenamiento con nuevas respuestas...")
+            train_model.train()
+            print("[FEEDBACK] Auto-entrenamiento completado con éxito.")
+        except Exception as e:
+            print(f"[FEEDBACK] Error al entrenar: {e}")
+            
+        self.top.destroy()
 
 
 # ===================== MAIN =====================
