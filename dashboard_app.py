@@ -839,16 +839,17 @@ class DashboardApp:
 
         # Proximo ciclo y Tiempo
         next_frame = Frame(ctrl, bg=COLORS["bg"])
-        next_frame.pack(side=RIGHT)
-        Label(next_frame, text="Proximo ciclo:", font=("Segoe UI", 9),
+        next_frame.pack(side=LEFT, padx=20)
+        
+        Label(next_frame, text="Tiempo activo:", font=("Segoe UI", 9),
               bg=COLORS["bg"], fg=COLORS["text_dim"]).pack(side=LEFT, padx=(0, 4))
-        Label(next_frame, textvariable=self.var_next, font=("Segoe UI", 11, "bold"),
-              bg=COLORS["bg"], fg=COLORS["accent_blue"]).pack(side=LEFT)
-              
-        Label(next_frame, text=" | Tiempo activo:", font=("Segoe UI", 9),
-              bg=COLORS["bg"], fg=COLORS["text_dim"]).pack(side=LEFT, padx=(10, 4))
         Label(next_frame, textvariable=self.var_elapsed, font=("Segoe UI", 11, "bold"),
               bg=COLORS["bg"], fg=COLORS["accent_green"]).pack(side=LEFT)
+              
+        Label(next_frame, text=" | Proximo ciclo:", font=("Segoe UI", 9),
+              bg=COLORS["bg"], fg=COLORS["text_dim"]).pack(side=LEFT, padx=(10, 4))
+        Label(next_frame, textvariable=self.var_next, font=("Segoe UI", 11, "bold"),
+              bg=COLORS["bg"], fg=COLORS["accent_blue"]).pack(side=LEFT)
 
     def _build_log(self):
         log_frame = Frame(self.root, bg=COLORS["bg"], padx=20, pady=6)
