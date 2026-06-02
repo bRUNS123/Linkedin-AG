@@ -171,6 +171,7 @@ class ScraperEngine:
     def start(self):
         if self._running:
             return
+        self.start_time = time.time()
         self._stop_event.clear()
         self._pause_event.set()
         self._paused = False
@@ -680,6 +681,7 @@ class DashboardApp:
         self.var_scroll = StringVar(value="0")
         self.var_next = StringVar(value="-")
         self.var_phase = StringVar(value="-")
+        self.var_elapsed = StringVar(value="00:00:00")
         self.var_wait = IntVar(value=5)
         self.var_max_scroll = IntVar(value=150)
 
@@ -691,6 +693,7 @@ class DashboardApp:
 
         # Iniciar actualizaciones
         self._update_logs()
+        self._update_timer()
 
         # Cargar stats iniciales
         self._load_initial_stats()
@@ -834,13 +837,18 @@ class DashboardApp:
                                        textvariable=self.var_max_scroll, font=("Segoe UI", 10))
         self.spin_scroll.pack(side=LEFT)
 
-        # Proximo ciclo
+        # Proximo ciclo y Tiempo
         next_frame = Frame(ctrl, bg=COLORS["bg"])
         next_frame.pack(side=RIGHT)
         Label(next_frame, text="Proximo ciclo:", font=("Segoe UI", 9),
               bg=COLORS["bg"], fg=COLORS["text_dim"]).pack(side=LEFT, padx=(0, 4))
         Label(next_frame, textvariable=self.var_next, font=("Segoe UI", 11, "bold"),
               bg=COLORS["bg"], fg=COLORS["accent_blue"]).pack(side=LEFT)
+              
+        Label(next_frame, text=" | Tiempo activo:", font=("Segoe UI", 9),
+              bg=COLORS["bg"], fg=COLORS["text_dim"]).pack(side=LEFT, padx=(10, 4))
+        Label(next_frame, textvariable=self.var_elapsed, font=("Segoe UI", 11, "bold"),
+              bg=COLORS["bg"], fg=COLORS["accent_green"]).pack(side=LEFT)
 
     def _build_log(self):
         log_frame = Frame(self.root, bg=COLORS["bg"], padx=20, pady=6)
@@ -871,6 +879,17 @@ class DashboardApp:
         self.log_text.tag_configure("info", foreground=COLORS["accent_blue"])
 
     # --- Event handlers ---
+    def _update_timer(self):
+        if self.engine.is_running and hasattr(self.engine, 'start_time'):
+            elapsed = int(time.time() - self.engine.start_time)
+            h = elapsed // 3600
+            m = (elapsed % 3600) // 60
+            s = elapsed % 60
+            self.var_elapsed.set(f"{h:02d}:{m:02d}:{s:02d}")
+        elif not self.engine.is_running:
+            self.var_elapsed.set("00:00:00")
+        self.root.after(1000, self._update_timer)
+
     def _on_start(self):
         self.engine.wait_minutes = self.var_wait.get()
         self.engine.max_scroll = self.var_max_scroll.get()
