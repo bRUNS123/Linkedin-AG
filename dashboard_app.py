@@ -1227,8 +1227,12 @@ class FeedbackWindow:
 # ===================== MAIN =====================
 
 def main():
+    import sys
+    autostart = "--autostart" in sys.argv
     root = Tk()
     app = DashboardApp(root)
+    if autostart:
+        root.after(1000, app._on_start)
     root.mainloop()
 
 if __name__ == "__main__":
