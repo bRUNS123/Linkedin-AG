@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Posts Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #ffffff;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            padding-top: 140px;
+        }
+
+        /* STICKY BANNER */
+        .sticky-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #ffffff;
+            z-index: 1000;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border-bottom: 1px solid #eee;
+        }
+
+        .banner-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 12px 20px;
+        }
+
+        .banner-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .banner-title {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }
+
+        .banner-title h1 {
+            margin: 0;
+            font-size: 1.6rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .banner-title .subtitle {
+            font-size: 0.9rem;
+            color: #666;
+            margin: 0;
+        }
+
+        .banner-stats {
+            display: flex;
+            gap: 10px;
+        }
+
+        .stat-badge {
+            background: #f8f9fa;
+            padding: 4px 12px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-badge.highlight {
+            background: #ebf8ff;
+            border-color: #bee3f8;
+            color: #2b6cb0;
+        }
+
+        .stat-val {
+            font-weight: 800;
+            font-size: 1rem;
+        }
+
+        .stat-lab {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: #666;
+        }
+
+        /* FILTERS ROW */
+        .filters {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .filter-input {
+            flex: 1;
+            padding: 8px 15px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: #667eea;
+            background: #fff;
+        }
+
+        .filter-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .compact-select {
+            padding: 8px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            background: white;
+        }
+
+        .btn-action {
+            padding: 8px 16px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            background: white;
+            transition: all 0.2s;
+        }
+
+        .btn-action.primary {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .btn-action:hover {
+            background: #f8fafc;
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #f8fafc;
+            padding: 4px 10px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            white-space: nowrap;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .highlight-positive {
+            background-color: #d1fae5;
+            color: #065f46;
+            padding: 0 2px;
+            border-radius: 2px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .highlight-positive:hover {
+            background-color: #a7f3d0;
+            text-decoration: underline;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 46px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #cbd5e0;
+            transition: .3s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #667eea;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(22px);
+        }
+
+        .toggle-label {
+            font-weight: 600;
+            color: #4a5568;
+            font-size: 0.85rem;
+        }
+
+        .posts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 24px;
+            width: 100%;
+        }
+
+        .post-card {
+            background: white;
+            border: 1px solid #e8e8e8;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+            transition: all 0.3s ease;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .post-card:hover {
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+            transform: translateY(-3px);
+        }
+
+        .post-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 15px;
+        }
+
+        .author-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 1.2rem;
+        }
+
+        .author-info {
+            flex: 1;
+        }
+
+        .author-name {
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: #1a1a1a;
+            margin-bottom: 3px;
+        }
+
+        .author-name a {
+            color: #1a1a1a;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .author-name a:hover {
+            color: #667eea;
+        }
+
+        .post-time {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .post-content {
+            color: #333;
+            line-height: 1.8;
+            margin-bottom: 15px;
+            max-height: 150px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .post-content.expanded {
+            max-height: none;
+        }
+
+        .read-more {
+            color: #667eea;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 0.95rem;
+            display: inline-block;
+            margin-top: 5px;
+        }
+
+        .post-badges {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-offer {
+            background: #e6fffa;
+            color: #2c7a7b;
+            border: 1px solid #b2f5ea;
+        }
+
+        .badge-score {
+            background: #ebf8ff;
+            color: #2b6cb0;
+            border: 1px solid #bee3f8;
+        }
+
+        .feedback-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: auto;
+            border-top: 1px solid #f0f0f0;
+            padding-top: 15px;
+        }
+
+        .btn-feedback {
+            padding: 8px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            background: white;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-feedback:hover {
+            background: #f7fafc;
+        }
+
+        .btn-valid:hover {
+            border-color: #48bb78;
+            color: #2f855a;
+        }
+
+        .btn-invalid:hover {
+            border-color: #f56565;
+            color: #c53030;
+        }
+
+        .highlight-positive {
+            background-color: #d1fae5;
+            color: #065f46;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+
+        .highlight-negative {
+            background-color: #fee2e2;
+            color: #991b1b;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .keyword-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin: 3px;
+            background: #eee;
+        }
+
+        .keyword-tag button {
+            background: none;
+            border: none;
+            font-weight: bold;
+            margin-left: 5px;
+            cursor: pointer;
+            color: #666;
+        }
+
+        .keyword-tag.pos {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .keyword-tag.neg {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .no-results,
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #888;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="sticky-banner">
+            <div class="banner-content">
+                <div class="banner-top">
+                    <div class="banner-title">
+                        <h1>LinkedIn Posts</h1>
+                        <p class="subtitle">Análisis de Ofertas</p>
+                    </div>
+                    <div class="banner-stats">
+                        <div class="stat-badge">
+                            <span class="stat-val" id="totalPosts">0</span>
+                            <span class="stat-lab">Total</span>
+                        </div>
+                        <div class="stat-badge highlight">
+                            <span class="stat-val" id="totalOffers">0</span>
+                            <span class="stat-lab">Ofertas</span>
+                        </div>
+                        <div class="stat-badge" style="background: #ebf8ff; border-color: #bee3f8; color: #2b6cb0;">
+                            <span class="stat-val" id="totalLeads">0</span>
+                            <span class="stat-lab">Leads 📧</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filters">
+                    <input type="text" class="filter-input" id="searchInput"
+                        placeholder="🔍 Buscar autor, cargo o lugar...">
+
+                    <div class="filter-actions">
+                        <select id="sortSelect" onchange="sortPosts()" class="compact-select">
+                            <option value="score_date" selected>🚀 Score Max + Reciente</option>
+                            <option value="date_desc">📅 Sólo Reciente</option>
+                            <option value="score_desc">🚀 Sólo Score (Max)</option>
+                            <option value="score_asc">📉 Sólo Score (Min)</option>
+                        </select>
+
+                        <button onclick="downloadCSV()" class="btn-action"
+                            title="Descargar vista actual como Excel/CSV">📥 CSV</button>
+                        <button onclick="reanalyzeAll()" class="btn-action primary">🔄 Re-analizar</button>
+                        <button onclick="openConfig()" class="btn-action">⚙️ Config</button>
+
+                        <div class="control-group">
+                            <div class="toggle-container">
+                                <span class="toggle-label">Sólo Ofertas</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="offerFilter">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="toggle-container" title="Mostrar sólo posts con correo electrónico">
+                                <span class="toggle-label">Súper-Lead 📧</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="leadFilter">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="postsContainer">
+            <div class="loading">Cargando datos...</div>
+        </div>
+    </div>
+
+    <!-- CONFIG MODAL -->
+    <div id="configModal" class="modal">
+        <div class="modal-content">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:25px;">
+                <h2 style="margin:0; font-size:1.5rem;">🧠 Configuración de Detección IA</h2>
+                <button onclick="closeConfig()"
+                    style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:30px;">
+                <div>
+                    <h3 style="color:#2f855a; display:flex; align-items:center; gap:5px; margin-bottom:15px;">👍
+                        Palabras Oferta</h3>
+                    <div style="display:flex; gap:5px; margin-bottom:10px;">
+                        <input type="text" id="newPosKw" placeholder="Nueva palabra..."
+                            style="flex:1; padding:8px; border:1px solid #ddd; border-radius:6px;">
+                        <button onclick="addKeyword('positive')"
+                            style="background:#48bb78; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer;">Agregar</button>
+                    </div>
+                    <div id="posKwList"
+                        style="display:flex; flex-wrap:wrap; gap:8px; max-height:300px; overflow-y:auto; padding:5px;">
+                    </div>
+                </div>
+                <div>
+                    <h3 style="color:#c53030; display:flex; align-items:center; gap:5px; margin-bottom:15px;">👎
+                        Palabras Negativas</h3>
+                    <div style="display:flex; gap:5px; margin-bottom:10px;">
+                        <input type="text" id="newNegKw" placeholder="Nueva palabra..."
+                            style="flex:1; padding:8px; border:1px solid #ddd; border-radius:6px;">
+                        <button onclick="addKeyword('negative')"
+                            style="background:#f56565; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer;">Agregar</button>
+                    </div>
+                    <div id="negKwList"
+                        style="display:flex; flex-wrap:wrap; gap:8px; max-height:300px; overflow-y:auto; padding:5px;">
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:30px; padding-top:20px; border-top:1px solid #eee; text-align:right;">
+                <button onclick="saveAndRetrain()"
+                    style="background:#667eea; color:white; border:none; padding:12px 25px; border-radius:8px; font-weight:600; cursor:pointer; font-size:1rem; box-shadow: 0 4px 10px rgba(102, 126, 234, 0.3);">
+                    💾 Guardar y Re-analizar todo
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allPosts = [];
+        let filteredPosts = [];
+        let currentKeywords = { positive: [], negative: [] };
+        let globalVotesMap = {};
+        let pendingVotes = new Set();
+
+        // Paging state
+        let currentPage = 1;
+        const pageSize = 50;
+        let isThrottled = false;
+
+        async function updateVoteCounts() {
+            try {
+                const response = await fetch('/feedback');
+                if (response.ok) {
+                    const votes = await response.json();
+                    votes.forEach(v => {
+                        const key = `${v.author}|${v.text.substring(0, 50)}`;
+                        if (pendingVotes.has(key)) return;
+                        if (!v.votes) {
+                            globalVotesMap[key] = { yes: v.is_offer ? 1 : 0, no: v.is_offer ? 0 : 1 };
+                        } else {
+                            globalVotesMap[key] = v.votes;
+                        }
+                    });
+                    updateVisibleButtons();
+                }
+            } catch (e) { console.error("Polling error", e); }
+        }
+
+        function updateVisibleButtons() {
+            const cards = document.querySelectorAll('.post-card');
+            cards.forEach(card => {
+                const uniqueKey = card.dataset.key;
+                if (uniqueKey && globalVotesMap[uniqueKey] && !pendingVotes.has(uniqueKey)) {
+                    const voteData = globalVotesMap[uniqueKey];
+                    const yesCount = voteData.yes || 0;
+                    const noCount = voteData.no || 0;
+                    const totalVotes = yesCount + noCount;
+
+                    const yesButton = card.querySelector('.btn-valid');
+                    const noButton = card.querySelector('.btn-invalid');
+                    const voteLabel = document.getElementById(`votecount-${card.id}`);
+
+                    if (yesButton && !yesButton.innerText.includes(`(${yesCount})`)) {
+                        yesButton.innerText = `👍 Es Oferta (${yesCount})`;
+                    }
+                    if (noButton && !noButton.innerText.includes(`(${noCount})`)) {
+                        noButton.innerText = `👎 No es Oferta (${noCount})`;
+                    }
+                    if (voteLabel && totalVotes > 0) {
+                        const newText = totalVotes === 1 ? '👤 1 Voto registrado' : `👤 ${totalVotes} Votos registrados`;
+                        if (voteLabel.innerText !== newText) voteLabel.innerText = newText;
+                    }
+                }
+            });
+        }
+
+        function startPolling() {
+            setInterval(updateVoteCounts, 3000);
+            updateVoteCounts();
+        }
+
+        async function loadPosts() {
+            try {
+                const kwResponse = await fetch('/keywords');
+                if (kwResponse.ok) currentKeywords = await kwResponse.json();
+                await updateVoteCounts();
+
+                const response = await fetch('extracted_posts_with_locations.json');
+                allPosts = await response.json();
+
+                allPosts = allPosts.map(post => {
+                    const key = `${post.author}|${post.text.substring(0, 50)}`;
+                    post.uniqueKey = key;
+                    post.dateObj = new Date(post.time_posted);
+                    post.job_prediction = calculateDynamicScore(post);
+                    return post;
+                });
+                filterPosts();
+                startPolling();
+            } catch (error) {
+                document.getElementById('postsContainer').innerHTML = '<div class="no-results">Error cargando datos.</div>';
+                console.error(error);
+            }
+        }
+
+        function downloadCSV() {
+            if (filteredPosts.length === 0) { alert("No hay datos para exportar"); return; }
+
+            const headers = ["Autor", "Enlace Perfil", "Puntuacion", "Emails", "Ubicación", "Fecha", "Texto"];
+            const rows = filteredPosts.map(p => {
+                const emails = p.job_prediction.emails ? p.job_prediction.emails.join('; ') : '';
+                const locs = p.locations ? [...p.locations.communes.map(c => c.commune), ...p.locations.regions].join(', ') : '';
+                const score = (p.job_prediction.score * 100).toFixed(1) + "%";
+                return [
+                    `"${p.author.replace(/"/g, '""')}"`,
+                    `"${p.profile_url}"`,
+                    `"${score}"`,
+                    `"${emails}"`,
+                    `"${locs.replace(/"/g, '""')}"`,
+                    `"${p.time_posted}"`,
+                    `"${p.text.substring(0, 500).replace(/"/g, '""').replace(/\n/g, ' ')}..."`
+                ];
+            });
+
+            const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `LinkedIn_Leads_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function calculateDynamicScore(post) {
+            let prediction = detectJobOffer(post.text);
+            const key = post.uniqueKey;
+            const voteData = globalVotesMap[key];
+
+            // CRITICAL: Merge emails from server if JS missed them (or vice versa)
+            let combinedEmails = [...prediction.emails];
+            if (post.job_prediction && post.job_prediction.emails) {
+                post.job_prediction.emails.forEach(e => {
+                    if (!combinedEmails.includes(e)) combinedEmails.push(e);
+                });
+            }
+            prediction.emails = combinedEmails;
+
+            if (voteData) {
+                const yes = voteData.yes || 0;
+                const no = voteData.no || 0;
+                const total = yes + no;
+
+                if (total > 0) {
+                    const asymptoticRatio = (yes + 0.05) / (total + 0.1);
+                    let voteWeight = 0.8;
+                    if (total >= 3) voteWeight = 0.95;
+
+                    const kwProb = Math.max(0.0, Math.min(prediction.score, 1.0));
+                    const keywordWeight = 1.0 - voteWeight;
+                    const finalScore = (asymptoticRatio * voteWeight) + (kwProb * keywordWeight);
+
+                    return {
+                        ...prediction,
+                        score: finalScore,
+                        is_offer: finalScore > 0.4,
+                        has_vote: true,
+                        vote_val: asymptoticRatio
+                    };
+                }
+            } else if (post.job_prediction && post.job_prediction.has_vote) {
+                const p = post.job_prediction;
+                return {
+                    ...prediction, // Contains combined emails
+                    score: p.score,
+                    is_offer: p.is_offer,
+                    has_vote: p.has_vote,
+                    vote_val: p.vote_val
+                };
+            }
+            return prediction;
+        }
+
+        function normalizeText(text) {
+            if (!text) return "";
+            return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        }
+
+        function detectJobOffer(text) {
+            const textNorm = normalizeText(text);
+            const foundPositive = [];
+            const foundNegative = [];
+            currentKeywords.positive.forEach(kw => { if (textNorm.includes(normalizeText(kw))) foundPositive.push(kw); });
+            currentKeywords.negative.forEach(kw => { if (textNorm.includes(normalizeText(kw))) foundNegative.push(kw); });
+
+            let score = 0.0;
+            if (foundPositive.length > 0) score += foundPositive.length * 0.4;
+            if (foundNegative.length > 0) score -= foundNegative.length * 0.6;
+
+            score = Math.max(0.0, Math.min(score, 1.0));
+
+            // Regex robust synchronized with server
+            const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+            let emails = Array.from(new Set(text.match(emailPattern) || []));
+            emails = emails.map(e => e.replace(/[.,]$/, '')); // Clean trailing dots/commas
+
+            return {
+                is_offer: score > 0.4,
+                score: score,
+                found_positive: foundPositive,
+                found_negative: foundNegative,
+                emails: emails
+            };
+        }
+
+        function sortPosts() {
+            const sortValue = document.getElementById('sortSelect').value;
+            filteredPosts.sort((a, b) => {
+                if (sortValue === 'date_desc') return (b.dateObj || 0) - (a.dateObj || 0);
+
+                const scoreA = a.job_prediction ? a.job_prediction.score : -1;
+                const scoreB = b.job_prediction ? b.job_prediction.score : -1;
+
+                if (sortValue === 'score_date') {
+                    // Ordenar por Score DESC, luego por Fecha DESC
+                    if (scoreB !== scoreA) return scoreB - scoreA;
+                    return (b.dateObj || 0) - (a.dateObj || 0);
+                }
+
+                return sortValue === 'score_desc' ? scoreB - scoreA : scoreA - scoreB;
+            });
+            renderPosts();
+        }
+
+        function filterPosts() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const showOnlyOffers = document.getElementById('offerFilter').checked;
+            const showOnlyLeads = document.getElementById('leadFilter').checked;
+
+            filteredPosts = allPosts.filter(post => {
+                const textMatch = post.author.toLowerCase().includes(searchTerm) || post.text.toLowerCase().includes(searchTerm) ||
+                    (post.locations && (post.locations.regions.join(' ').toLowerCase().includes(searchTerm) || post.locations.communes.map(c => c.commune).join(' ').toLowerCase().includes(searchTerm)));
+
+                const hasEmail = post.job_prediction && post.job_prediction.emails && post.job_prediction.emails.length > 0;
+
+                const offerMatch = !showOnlyOffers || (post.job_prediction && post.job_prediction.is_offer);
+                const leadMatch = !showOnlyLeads || hasEmail;
+
+                return textMatch && offerMatch && leadMatch;
+            });
+            updateStats();
+            sortPosts();
+        }
+
+        function updateStats() {
+            document.getElementById('totalPosts').textContent = allPosts.length.toLocaleString();
+            document.getElementById('totalOffers').textContent = allPosts.filter(p => p.job_prediction && p.job_prediction.is_offer).length.toLocaleString();
+            document.getElementById('totalLeads').textContent = allPosts.filter(p => p.job_prediction && p.job_prediction.emails && p.job_prediction.emails.length > 0).length.toLocaleString();
+        }
+
+        function highlightKeywords(text, prediction) {
+            if (!prediction) return text;
+            let highlighted = text;
+            const allFound = [...prediction.found_positive.map(kw => ({ kw, type: 'pos' })), ...prediction.found_negative.map(kw => ({ kw, type: 'neg' }))].sort((a, b) => b.kw.length - a.kw.length);
+            allFound.forEach(item => {
+                const regex = new RegExp(`(${item.kw})`, 'gi');
+                if (item.type === 'pos') {
+                    highlighted = highlighted.replace(regex, `<span class="highlight-positive" onclick="quickSearch('$1'); event.stopPropagation();" title="Buscar más como '$1'">$1</span>`);
+                } else {
+                    highlighted = highlighted.replace(regex, `<span class="highlight-negative">$1</span>`);
+                }
+            });
+            return highlighted;
+        }
+
+        function quickSearch(term) {
+            const input = document.getElementById('searchInput');
+            input.value = term;
+            filterPosts();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function generatePostId(post) {
+            const str = post.author + post.text.substring(0, 50);
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash |= 0; }
+            return 'post_' + Math.abs(hash);
+        }
+
+        function renderPosts() {
+            const container = document.getElementById('postsContainer');
+            if (filteredPosts.length === 0) {
+                container.innerHTML = '<div class="no-results">No se encontraron resultados</div>';
+                return;
+            }
+
+            container.innerHTML = `<div class="posts-grid" id="mainGrid"></div><div id="loadingMore" style="text-align:center; padding:30px; display:none; color:#888;">Cargando más...</div>`;
+            renderMorePosts();
+        }
+
+        function renderMorePosts() {
+            const grid = document.getElementById('mainGrid');
+            if (!grid) return;
+
+            const start = (currentPage - 1) * pageSize;
+            const end = start + pageSize;
+            const batch = filteredPosts.slice(start, end);
+
+            if (batch.length === 0) return;
+
+            const cardsHTML = batch.map((post, index) =>
+                createPostCardHTML(post, index, generatePostId(post))
+            ).join('');
+
+            grid.insertAdjacentHTML('beforeend', cardsHTML);
+            currentPage++;
+        }
+
+        // Throttle scroll event
+        window.addEventListener('scroll', () => {
+            if (isThrottled) return;
+            isThrottled = true;
+            setTimeout(() => {
+                const scrolledTo = window.innerHeight + window.scrollY;
+                const threshold = document.body.offsetHeight - 800; // Load 800px before bottom
+
+                if (scrolledTo >= threshold) {
+                    renderMorePosts();
+                }
+                isThrottled = false;
+            }, 100);
+        });
+
+        function createPostCardHTML(post, index, postId) {
+            const initials = post.author.split(' ').map(n => n[0]).join('').substring(0, 2);
+            const pred = post.job_prediction || { score: 0, is_offer: false, has_vote: false, vote_val: 0 };
+
+            // Formatting Score: Show decimals for extremes
+            let scoreText = "";
+            const rawPct = pred.score * 100;
+            if (rawPct > 0 && rawPct < 1) scoreText = rawPct.toFixed(2) + "%";
+            else if (rawPct > 99 && rawPct < 100) scoreText = rawPct.toFixed(2) + "%";
+            else scoreText = Math.round(rawPct) + "%";
+
+            const rawText = post.text;
+            const needsExpand = rawText.length > 300;
+            const truncatedRaw = needsExpand ? rawText.substring(0, 300) : rawText;
+
+            // Highlight only the relevant part
+            const displayTextFull = highlightKeywords(rawText, pred);
+            const displayTextShort = highlightKeywords(truncatedRaw, pred) + (needsExpand ? '...' : '');
+
+            let badgeHtml = '';
+            if (pred.has_vote) {
+                const badgeColor = pred.vote_val >= 0.5 ? '#2f855a' : '#e53e3e';
+                const badgeBg = pred.vote_val >= 0.5 ? '#e6fffa' : '#fee2e2';
+                badgeHtml = `<span class="badge" style="background:${badgeBg}; color:${badgeColor}; border:2px solid ${badgeColor};">Voto: ${scoreText} Oferta</span>`;
+            } else {
+                if (pred.is_offer) badgeHtml = `<span class="badge badge-offer">🚀 Posible Oferta</span>`;
+                badgeHtml += ` <span class="badge badge-score">Score IA: ${scoreText}</span>`;
+            }
+
+            const isPending = pendingVotes.has(post.uniqueKey);
+            const voteData = globalVotesMap[post.uniqueKey] || { yes: 0, no: 0 };
+            const total = voteData.yes + voteData.no;
+
+            let voteCountLabel = '';
+            if (isPending) {
+                voteCountLabel = `⏳ <i>Registrando voto...</i>`;
+            } else if (total > 0) {
+                voteCountLabel = `👤 ${total} ${total === 1 ? 'Voto registrado' : 'Votos registrados'}`;
+            }
+
+            // Metadata section (Priority: Emails, then Locations)
+            let emailsHtml = '';
+            if (pred.emails && pred.emails.length > 0) {
+                emailsHtml = `<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">${[...new Set(pred.emails)].map(e => `
+                    <a href="mailto:${e}" style="display:inline-flex; align-items:center; gap:6px; background:#ebf8ff; color:#2c5282; padding:4px 12px; border-radius:30px; text-decoration:none; font-size:0.85rem; border:1px solid #bee3f8; font-weight:600; transition:all 0.2s;">
+                        📧 <span style="opacity:0.9;">${e}</span>
+                    </a>
+                `).join('')}</div>`;
+            }
+
+            let locHtml = '';
+            if (post.locations && (post.locations.regions.length > 0 || post.locations.communes.length > 0)) {
+                locHtml = `
+                    <div style="display:inline-flex; align-items:center; gap:6px; background:#f7fafc; color:#4a5568; padding:4px 12px; border-radius:30px; font-size:0.8rem; border:1px solid #e2e8f0; font-weight:600; margin-bottom:8px;">
+                        📍 <span style="opacity:0.85;">${[...post.locations.communes.map(c => c.commune), ...post.locations.regions].join(', ')}</span>
+                    </div>
+                `;
+            }
+
+            const metadataHtml = `
+                <div style="margin-top:15px;">
+                    ${emailsHtml}
+                    ${locHtml}
+                </div>
+            `;
+
+            // Semantic Heatmap v3: Red to Green Scale
+            let bgColor = "white";
+            let borderAccent = "transparent";
+            const scoreVal = pred.score * 100;
+
+            if (scoreVal >= 85) {
+                bgColor = "rgba(16, 185, 129, 0.18)";
+                borderAccent = "#10b981";
+            } else if (scoreVal >= 60) {
+                bgColor = "rgba(74, 222, 128, 0.12)";
+                borderAccent = "#4ade80";
+            } else if (scoreVal >= 40) {
+                bgColor = "rgba(253, 224, 71, 0.10)";
+                borderAccent = "#fde047";
+            } else if (scoreVal >= 20) {
+                bgColor = "rgba(251, 146, 60, 0.10)";
+                borderAccent = "#fb923c";
+            } else {
+                bgColor = "rgba(248, 113, 113, 0.12)";
+                borderAccent = "#f87171";
+            }
+
+            return `
+                <div class="post-card" id="${postId}" data-key="${post.uniqueKey}" style="background-color: ${bgColor}; border-left: 4px solid ${borderAccent};">
+                    <div class="post-badges">${badgeHtml}</div>
+                    <div id="votecount-${postId}" style="font-size:0.8rem; color:#666; margin-top:5px; height:20px;">${voteCountLabel}</div>
+                    ${metadataHtml}
+                    
+                    <div class="post-header" style="margin-top:15px;">
+                        <div class="author-avatar">${initials}</div>
+                        <div class="author-info">
+                            <div class="author-name"><a href="${post.profile_url}" target="_blank">${post.author}</a></div>
+                            <div class="post-time">${post.time_posted}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="post-content" id="content-${postId}">${displayTextShort}</div>
+                    
+                    ${needsExpand ? `<div class="read-more" onclick="toggleExpand('${postId}', \`${displayTextFull.replace(/`/g, "\\`").replace(/"/g, "&quot;")}\`)">Leer más</div>` : ''}
+                    
+                    <div class="feedback-actions">
+                        <button class="btn-feedback btn-valid" onclick="sendFeedback('${post.author.replace(/'/g, "\\'")}', true, '${postId}')">👍 Es Oferta (${voteData.yes})</button>
+                        <button class="btn-feedback btn-invalid" onclick="sendFeedback('${post.author.replace(/'/g, "\\'")}', false, '${postId}')">👎 No es Oferta (${voteData.no})</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleExpand(elementId, fullText) {
+            const div = document.getElementById(`content-${elementId}`);
+            if (!div) return;
+            const isExp = div.classList.toggle('expanded');
+            div.innerHTML = isExp ? fullText : fullText.substring(0, 300) + '...';
+            event.target.textContent = isExp ? 'Leer menos' : 'Leer más';
+        }
+
+        async function sendFeedback(author, isOffer, postId) {
+            const post = allPosts.find(p => p.author === author);
+            if (!post) return;
+            const key = post.uniqueKey;
+
+            // Optimistic update
+            if (!globalVotesMap[key]) globalVotesMap[key] = { yes: 0, no: 0 };
+            if (isOffer) globalVotesMap[key].yes++; else globalVotesMap[key].no++;
+
+            pendingVotes.add(key);
+            setTimeout(() => { pendingVotes.delete(key); updateVisibleButtons(); }, 2000);
+
+            // Re-calculate and update the card UI
+            post.job_prediction = calculateDynamicScore(post);
+            const card = document.getElementById(postId);
+            if (card) {
+                // Instead of outerHTML which can disturb grid, we just update the card content
+                // BUT since we want to update the border/background, we need to replace the card itself
+                // Grid should handle this if we don't break the container logic
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = createPostCardHTML(post, 0, postId);
+                card.parentNode.replaceChild(tempDiv.firstElementChild, card);
+            }
+
+            try {
+                await fetch('/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: post.text, author: post.author, is_offer: isOffer, timestamp: new Date().toISOString() })
+                });
+            } catch (error) { console.error('Feedback error', error); }
+        }
+
+        function openConfig() { document.getElementById('configModal').style.display = 'flex'; renderKeywords(); }
+        function closeConfig() { document.getElementById('configModal').style.display = 'none'; }
+
+        function renderKeywords() {
+            const pos = document.getElementById('posKwList'); const neg = document.getElementById('negKwList');
+            pos.innerHTML = currentKeywords.positive.map(kw => `<div class="keyword-tag pos">${kw} <button onclick="removeKeyword('positive', '${kw}')">&times;</button></div>`).join('');
+            neg.innerHTML = currentKeywords.negative.map(kw => `<div class="keyword-tag neg">${kw} <button onclick="removeKeyword('negative', '${kw}')">&times;</button></div>`).join('');
+        }
+
+        function addKeyword(t) {
+            const i = document.getElementById(t === 'positive' ? 'newPosKw' : 'newNegKw');
+            const kw = i.value.trim();
+            if (kw && !currentKeywords[t].includes(kw)) { currentKeywords[t].push(kw); i.value = ''; renderKeywords(); }
+        }
+
+        function removeKeyword(t, kw) { currentKeywords[t] = currentKeywords[t].filter(k => k !== kw); renderKeywords(); }
+
+        async function saveAndRetrain() {
+            try {
+                const res = await fetch('/keywords', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentKeywords) });
+                if (res.ok) { alert('Guardado! Recalculando...'); closeConfig(); loadPosts(); } else alert('Error al guardar');
+            } catch (e) { alert('Error de conexión'); }
+        }
+
+        async function reanalyzeAll() {
+            if (!confirm("¿Ejecutar análisis completo en el servidor?")) return;
+            try {
+                const res = await fetch('/reanalyze', { method: 'POST' });
+                if (res.ok) { alert('✅ Análisis completado!'); loadPosts(); } else alert('❌ Error');
+            } catch (e) { alert('Error'); }
+        }
+
+        document.getElementById('searchInput').addEventListener('input', filterPosts);
+        document.getElementById('offerFilter').addEventListener('change', filterPosts);
+        document.getElementById('leadFilter').addEventListener('change', filterPosts);
+        loadPosts();
+    </script>
+</body>
+
+</html>

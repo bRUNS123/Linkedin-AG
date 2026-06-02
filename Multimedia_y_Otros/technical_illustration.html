@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Modelo Isométrico - Interactivo y Paramétrico</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #121212; 
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #css2d-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none; }
+        
+        /* Etiquetas Minimalistas Oscuras */
+        .label-node {
+            color: #d0d0d0;
+            font-size: 11px;
+            font-weight: 500;
+            background: rgba(18, 18, 18, 0.75);
+            padding: 3px 6px;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255,255,255,0.05);
+            white-space: nowrap;
+        }
+        
+        .label-force {
+            color: #5599ff;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(18, 18, 18, 0.7);
+            padding: 3px 6px;
+            border-radius: 4px;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(85, 153, 255, 0.15);
+            white-space: nowrap;
+            letter-spacing: 0.5px;
+        }
+
+        .label-dim {
+            color: #999;
+            font-size: 11px;
+            background: rgba(18, 18, 18, 0.8);
+            padding: 2px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+            backdrop-filter: blur(2px);
+        }
+
+        /* Panel de Controles Inferiores */
+        #controls-panel {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 10px;
+            background: rgba(30, 30, 30, 0.85);
+            padding: 8px 16px;
+            border-radius: 30px;
+            border: 1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(10px);
+            pointer-events: auto;
+        }
+
+        .view-btn {
+            background: transparent;
+            border: none;
+            font-family: inherit;
+            font-size: 11px;
+            color: #888;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 8px 16px;
+            border-radius: 20px;
+        }
+
+        .view-btn:hover { color: #fff; background: rgba(255,255,255,0.05); }
+        .view-btn.active { color: #fff; background: rgba(255,255,255,0.12); font-weight: 600; }
+
+        /* Panel de Parámetros Laterales (UI) */
+        #params-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 260px;
+            background: rgba(24, 24, 24, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 20px;
+            z-index: 10;
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            backdrop-filter: blur(10px);
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        .param-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .param-group label {
+            font-size: 10px;
+            color: #999;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .param-group label span.unit {
+            color: #5599ff;
+            font-family: ui-monospace, monospace;
+            font-weight: normal;
+        }
+
+        .param-input {
+            background: #111;
+            border: 1px solid #333;
+            color: #fff;
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-family: ui-monospace, monospace;
+            font-size: 13px;
+            outline: none;
+            transition: border 0.3s;
+        }
+
+        .param-input:focus {
+            border-color: #5599ff;
+        }
+
+        select.param-input {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 1em;
+            padding-right: 30px;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        /* Título */
+        #header-title {
+            position: absolute;
+            top: 25px;
+            left: 25px;
+            z-index: 10;
+            pointer-events: none;
+            border-left: 3px solid #5599ff;
+            padding-left: 15px;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        #header-title h1 { margin: 0; font-size: 14px; font-weight: 600; color: #eee; letter-spacing: 1px; text-transform: uppercase; }
+        #header-title p { margin: 5px 0 0 0; font-size: 12px; color: #777; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="header-title">
+        <h1>Análisis Estructural</h1>
+        <p>Modelo Paramétrico Interactivo</p>
+    </div>
+
+    <!-- Panel de Parámetros Lateral -->
+    <div id="params-panel">
+        <div class="param-group">
+            <label>TIPO DE TECHO</label>
+            <select class="param-input" id="inp-tipo">
+                <option value="plana">Plana</option>
+                <option value="1agua">1 Agua</option>
+                <option value="2aguas_sim" selected>2 Aguas (simétrico)</option>
+                <option value="2aguas_asim">2 Aguas (asimétrico)</option>
+            </select>
+        </div>
+        <div class="param-group" id="group-cumb" style="display: none;">
+            <label>POSICIÓN CUMBRERA (DESDE IZQ.) <span class="unit" id="val-cumb">4,00 m</span></label>
+            <input type="text" class="param-input" id="inp-cumb" value="4.00">
+        </div>
+        <div class="param-group">
+            <label>LARGO DEL EDIFICIO <span class="unit" id="val-l">20,00 m</span></label>
+            <input type="text" class="param-input" id="inp-l" value="20.00">
+        </div>
+        <div class="param-group">
+            <label>ANCHO DEL EDIFICIO <span class="unit" id="val-w">20,00 m</span></label>
+            <input type="text" class="param-input" id="inp-w" value="20.00">
+        </div>
+        <div class="param-group">
+            <label>ALTURA ALERO / HOMBRO <span class="unit" id="val-h1">20,00 m</span></label>
+            <input type="text" class="param-input" id="inp-h1" value="20.00">
+        </div>
+        <div class="param-group">
+            <label>ALTURA CUMBRERA <span class="unit" id="val-h2">25,00 m</span></label>
+            <input type="text" class="param-input" id="inp-h2" value="25.00">
+        </div>
+        <div class="param-group" style="flex-direction: row; align-items: center; justify-content: space-between; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+            <label style="margin-bottom: 0; cursor: pointer;" for="chk-cargas">MOSTRAR CARGAS VIENTO</label>
+            <input type="checkbox" id="chk-cargas" checked style="width: auto; cursor: pointer; margin: 0; transform: scale(1.2);">
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+    <div id="css2d-container"></div>
+    
+    <div id="controls-panel">
+        <button class="view-btn active" data-view="iso">Isométrica</button>
+        <button class="view-btn" data-view="front">Frontal</button>
+        <button class="view-btn" data-view="side">Lateral</button>
+        <button class="view-btn" data-view="top">Planta</button>
+        <button class="view-btn" data-view="free">Libre</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+        import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+        import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+        import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x121212); 
+        THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+        const aspect = window.innerWidth / window.innerHeight;
+        const frustumSize = 45; // Ampliado para soportar estructuras de 20m+
+        const camera = new THREE.OrthographicCamera(
+            frustumSize * aspect / -2, frustumSize * aspect / 2,
+            frustumSize / 2, frustumSize / -2,
+            -500, 1000
+        );
+        camera.position.set(40, -40, 30);
+        camera.up.set(0, 0, 1);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.getElementById('css2d-container').appendChild(labelRenderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableRotate = false; // Bloqueado por defecto en Isométrica
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        function createLabel(text, position, className) {
+            const div = document.createElement('div');
+            div.className = className;
+            div.textContent = text;
+            const label = new CSS2DObject(div);
+            label.position.copy(position);
+            return label;
+        }
+
+        // --- MATERIALES GLOBALES ---
+        
+        // Oclusor para ocultar las partes traseras
+        const occluderMat = new THREE.MeshBasicMaterial({
+            color: 0x121212,
+            polygonOffset: true,
+            polygonOffsetFactor: 1.0,
+            polygonOffsetUnits: 1.0
+        });
+        
+        // Líneas principales gruesas (sutiles pero marcadas: 2.5px)
+        const matLine = new LineMaterial({
+            color: 0xffffff,
+            linewidth: 2.5, 
+            resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+            dashed: false
+        });
+
+        const edgeBackMat = new THREE.LineDashedMaterial({ 
+            color: 0x888888, 
+            dashSize: 0.8, 
+            gapSize: 0.5, 
+            depthTest: false, // FOOLPROOF X-RAY: Dibuja a través de las paredes
+            transparent: true,
+            opacity: 0.6
+        });
+
+        // --- SISTEMA PARAMÉTRICO ---
+        let mainGroup = new THREE.Group();
+        scene.add(mainGroup);
+
+        function createForce(tip, direction, length, text) {
+            const tail = tip.clone().sub(direction.clone().normalize().multiplyScalar(length));
+            const arrow = new THREE.ArrowHelper(direction.normalize(), tail, length, 0x5599ff, length * 0.15, length * 0.05);
+            const labelPos = tail.clone().sub(direction.clone().multiplyScalar(1.5));
+            const label = createLabel(text, labelPos, 'label-force');
+            const group = new THREE.Group();
+            group.add(arrow);
+            group.add(label);
+            return group;
+        }
+
+        function createDimension(start, end, text, offsetDir, offsetDist) {
+            const p1 = start.clone().add(offsetDir.clone().multiplyScalar(offsetDist));
+            const p2 = end.clone().add(offsetDir.clone().multiplyScalar(offsetDist));
+            
+            const lineMat = new THREE.LineBasicMaterial({ color: 0x666666 });
+            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p1, p2]), lineMat);
+            const ext1 = new THREE.Line(new THREE.BufferGeometry().setFromPoints([start, p1]), lineMat);
+            const ext2 = new THREE.Line(new THREE.BufferGeometry().setFromPoints([end, p2]), lineMat);
+            
+            const mid = p1.clone().lerp(p2, 0.5);
+            const label = createLabel(text, mid, 'label-dim');
+            
+            const group = new THREE.Group();
+            group.add(line, ext1, ext2, label);
+            return group;
+        }
+
+        function createAngleDimension(origin, vec1, vec2, radius, text) {
+            const points = [];
+            const segments = 16;
+            const v1 = vec1.clone().normalize();
+            const v2 = vec2.clone().normalize();
+            const axis = new THREE.Vector3().crossVectors(v1, v2).normalize();
+            const angle = v1.angleTo(v2);
+
+            for (let i = 0; i <= segments; i++) {
+                const theta = angle * (i / segments);
+                const v = v1.clone().applyAxisAngle(axis, theta).multiplyScalar(radius);
+                points.push(origin.clone().add(v));
+            }
+            
+            const lineMat = new THREE.LineBasicMaterial({ color: 0x88bbff }); // Azul tenue para el arco
+            const arc = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), lineMat);
+            
+            // Línea horizontal base de referencia
+            const pBase = origin.clone().add(v1.clone().multiplyScalar(radius * 1.2));
+            const l1 = new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, pBase]), lineMat);
+            
+            const midTheta = angle / 2;
+            const vMid = v1.clone().applyAxisAngle(axis, midTheta).multiplyScalar(radius * 1.4);
+            const labelPos = origin.clone().add(vMid);
+            const label = createLabel(text, labelPos, 'label-force'); // Usamos el mismo estilo azul de antes
+            
+            const group = new THREE.Group();
+            group.add(arc, l1, label);
+            return group;
+        }
+
+        function createDistributedLoad(pStart, pEnd, direction, arrowLength, text, isOutward) {
+            const group = new THREE.Group();
+            const numArrows = Math.max(3, Math.floor(pStart.distanceTo(pEnd) / 2));
+            const color = 0x5599ff;
+            const baseLinePoints = [];
+            const dir = direction.clone().normalize();
+            
+            for (let i = 0; i <= numArrows; i++) {
+                const t = i / numArrows;
+                const pSurface = pStart.clone().lerp(pEnd, t);
+                let pTail, pHead;
+                
+                if (isOutward) {
+                    pTail = pSurface.clone();
+                    pHead = pSurface.clone().add(dir.clone().multiplyScalar(arrowLength));
+                    baseLinePoints.push(pHead);
+                    group.add(new THREE.ArrowHelper(dir, pTail, arrowLength, color, arrowLength*0.25, arrowLength*0.25));
+                } else {
+                    pHead = pSurface.clone();
+                    pTail = pSurface.clone().sub(dir.clone().multiplyScalar(arrowLength));
+                    baseLinePoints.push(pTail);
+                    group.add(new THREE.ArrowHelper(dir, pTail, arrowLength, color, arrowLength*0.25, arrowLength*0.25));
+                }
+            }
+            
+            const combGeo = new THREE.BufferGeometry().setFromPoints(baseLinePoints);
+            const combLine = new THREE.Line(combGeo, new THREE.LineBasicMaterial({ color: color }));
+            group.add(combLine);
+            
+            const midPoint = baseLinePoints[Math.floor(numArrows / 2)].clone();
+            const offsetDir = isOutward ? dir : dir.clone().negate();
+            const labelPos = midPoint.clone().add(offsetDir.clone().multiplyScalar(arrowLength * 0.5));
+            group.add(createLabel(text, labelPos, 'label-force'));
+            
+            return group;
+        }
+
+        function updateStructure(tipo, L, W, H1, H2, CumbPos) {
+            // Limpiar geometría y etiquetas HTML anteriores
+            if (mainGroup) {
+                mainGroup.traverse((child) => {
+                    // Eliminar explícitamente los elementos HTML del DOM para evitar anotaciones fantasma
+                    if (child.isCSS2DObject && child.element && child.element.parentNode) {
+                        child.element.parentNode.removeChild(child.element);
+                    }
+                });
+                scene.remove(mainGroup);
+            }
+            mainGroup = new THREE.Group();
+            scene.add(mainGroup);
+
+            // 1. Base (Muros / Columnas)
+            const cubeGeo = new THREE.BoxGeometry(L, W, H1);
+            const cube = new THREE.Mesh(cubeGeo, occluderMat);
+            cube.position.set(L/2, W/2, H1/2);
+            
+            const cubeEdgesGeo = new THREE.EdgesGeometry(cubeGeo);
+            
+            // Líneas Frontales (Gruesas)
+            const cubeLineGeo = new LineSegmentsGeometry();
+            cubeLineGeo.setPositions(cubeEdgesGeo.attributes.position.array);
+            const cubeFront = new LineSegments2(cubeLineGeo, matLine);
+            cubeFront.renderOrder = 2; // Dibujar al final para tapar las punteadas
+            
+            // Líneas Traseras Ocultas (Finas y punteadas)
+            const cubeBack = new THREE.LineSegments(cubeEdgesGeo, edgeBackMat);
+            cubeBack.computeLineDistances();
+            cubeBack.renderOrder = 1; // Dibujar antes que las frontales
+            
+            cube.add(cubeFront);
+            cube.add(cubeBack);
+            mainGroup.add(cube);
+
+            // 2. Techo
+            let roofVertices;
+            let ridgeY = W / 2;
+            
+            if (tipo === 'plana') {
+                roofVertices = new Float32Array([
+                    0, 0, H1,   L, W, H1,   L, 0, H1,
+                    0, 0, H1,   0, W, H1,   L, W, H1
+                ]);
+            } else { // 1agua, 2aguas_sim, 2aguas_asim
+                if (tipo === '1agua') ridgeY = 0;
+                else if (tipo === '2aguas_asim') ridgeY = CumbPos;
+                else ridgeY = W / 2; // 2aguas_sim
+                
+                roofVertices = new Float32Array([
+                    // Frontón x=0
+                    0, 0, H1,   0, W, H1,   0, ridgeY, H2,
+                    // Frontón x=L
+                    L, W, H1,   L, 0, H1,   L, ridgeY, H2,
+                    // Faldón Y=0 (se convierte en pared vertical si ridgeY=0)
+                    0, 0, H1,   L, ridgeY, H2, L, 0, H1,
+                    0, 0, H1,   0, ridgeY, H2, L, ridgeY, H2,
+                    // Faldón Y=W (se convierte en pared vertical si ridgeY=W)
+                    0, W, H1,   L, W, H1,   L, ridgeY, H2,
+                    0, W, H1,   L, ridgeY, H2, 0, ridgeY, H2
+                ]);
+            }
+            
+            const roofGeo = new THREE.BufferGeometry();
+            roofGeo.setAttribute('position', new THREE.BufferAttribute(roofVertices, 3));
+
+            const roof = new THREE.Mesh(roofGeo, occluderMat);
+            const roofEdgesGeo = new THREE.EdgesGeometry(roofGeo);
+            
+            const roofLineGeo = new LineSegmentsGeometry();
+            roofLineGeo.setPositions(roofEdgesGeo.attributes.position.array);
+            const roofFront = new LineSegments2(roofLineGeo, matLine);
+            roofFront.renderOrder = 2;
+            
+            const roofBack = new THREE.LineSegments(roofEdgesGeo, edgeBackMat);
+            roofBack.computeLineDistances();
+            roofBack.renderOrder = 1;
+            
+            roof.add(roofFront);
+            roof.add(roofBack);
+            mainGroup.add(roof);
+
+            // 3. Ángulo y Cota Central (solo si no es plana)
+            if (tipo !== 'plana') {
+                const cumbY = ridgeY;
+                
+                // Cota vertical central (H2 - H1)
+                const pBaseCumb = new THREE.Vector3(L, cumbY, H1);
+                const pTopCumb = new THREE.Vector3(L, cumbY, H2);
+                
+                const cumbGeo = new THREE.BufferGeometry().setFromPoints([pBaseCumb, pTopCumb]);
+                const cumbLine = new THREE.Line(cumbGeo, new THREE.LineDashedMaterial({ color: 0x5599ff, dashSize: 0.5, gapSize: 0.5 }));
+                cumbLine.computeLineDistances();
+                
+                const diffH = (H2 - H1).toFixed(2);
+                const labelCumb = createLabel(`${diffH} m`, pBaseCumb.clone().lerp(pTopCumb, 0.5).add(new THREE.Vector3(0, 0, 0.5)), 'label-force');
+                mainGroup.add(cumbLine, labelCumb);
+                
+                // Ángulo de Inclinación del Techo (medido desde el alero más bajo)
+                let originAngle, v1, v2;
+                if (cumbY >= W / 2) {
+                    // Pendiente principal a la izquierda
+                    originAngle = new THREE.Vector3(L, 0, H1);
+                    v1 = new THREE.Vector3(0, 1, 0); 
+                    v2 = new THREE.Vector3(0, cumbY, H2 - H1); 
+                } else {
+                    // Pendiente principal a la derecha (ej. 1 agua en 0)
+                    originAngle = new THREE.Vector3(L, W, H1);
+                    v1 = new THREE.Vector3(0, -1, 0); 
+                    v2 = new THREE.Vector3(0, cumbY - W, H2 - H1); 
+                }
+                const angleRad = v1.angleTo(v2);
+                const angleDeg = (angleRad * 180 / Math.PI).toFixed(1);
+                mainGroup.add(createAngleDimension(originAngle, v1, v2, Math.max(L, W) * 0.12, `${angleDeg}°`));
+            }
+
+            // 4. Nodos
+            if (tipo !== 'plana') {
+                mainGroup.add(createLabel(`N3 · z=${H2.toFixed(1)} m`, new THREE.Vector3(L, W/2, H2), 'label-node'));
+            }
+            mainGroup.add(createLabel(`N2 · z=${H1.toFixed(1)} m`, new THREE.Vector3(L, W, H1), 'label-node'));
+            mainGroup.add(createLabel(`N1 · z=${(H1/2).toFixed(1)} m`, new THREE.Vector3(L, W, H1/2), 'label-node'));
+            mainGroup.add(createLabel(`Base · z=0.0 m`, new THREE.Vector3(L, W, 0), 'label-node'));
+
+            // 5. Cotas
+            const offsetDist = Math.max(L, W) * 0.15;
+            mainGroup.add(createDimension(new THREE.Vector3(0, 0, 0), new THREE.Vector3(L, 0, 0), `L=${L.toFixed(2)}m`, new THREE.Vector3(0, -1, 0), offsetDist));
+            mainGroup.add(createDimension(new THREE.Vector3(L, 0, 0), new THREE.Vector3(L, W, 0), `W=${W.toFixed(2)}m`, new THREE.Vector3(1, 0, 0), offsetDist));
+            mainGroup.add(createDimension(new THREE.Vector3(0, W, 0), new THREE.Vector3(0, W, H1), `H1=${H1.toFixed(2)}m`, new THREE.Vector3(-1, 1, 0).normalize(), offsetDist));
+            
+            if (tipo !== 'plana') {
+                mainGroup.add(createDimension(new THREE.Vector3(0, W/2, 0), new THREE.Vector3(0, W/2, H2), `H2=${H2.toFixed(2)}m`, new THREE.Vector3(-1, -1, 0).normalize(), offsetDist * 1.5));
+            }
+
+            // 6. Cargas de Viento Distribuidas
+            if (document.getElementById('chk-cargas').checked) {
+                const arrowLen = Math.max(L, W) * 0.12;
+                
+                // Muro Barlovento (Izquierda Y=0) - Presión
+                mainGroup.add(createDistributedLoad(
+                    new THREE.Vector3(L, 0, 0), new THREE.Vector3(L, 0, H1),
+                    new THREE.Vector3(0, 1, 0), arrowLen, '+0,8 q', false
+                ));
+                
+                // Muro Sotavento (Derecha Y=W) - Succión
+                mainGroup.add(createDistributedLoad(
+                    new THREE.Vector3(L, W, H1), new THREE.Vector3(L, W, 0),
+                    new THREE.Vector3(0, 1, 0), arrowLen, '-0,4 q', true
+                ));
+                
+                if (tipo !== 'plana') {
+                    // Techo Barlovento (Izquierda Y=0 a ridgeY)
+                    if (ridgeY > 0) {
+                        const roof1Dir = new THREE.Vector3(0, H2 - H1, -ridgeY).normalize();
+                        mainGroup.add(createDistributedLoad(
+                            new THREE.Vector3(L, 0, H1), new THREE.Vector3(L, ridgeY, H2),
+                            roof1Dir, arrowLen, '(1,2 sen α - 0,4)q', false
+                        ));
+                    }
+                    
+                    // Techo Sotavento (Derecha ridgeY a Y=W)
+                    if (ridgeY < W) {
+                        const roof2Dir = new THREE.Vector3(0, H2 - H1, W - ridgeY).normalize();
+                        mainGroup.add(createDistributedLoad(
+                            new THREE.Vector3(L, ridgeY, H2), new THREE.Vector3(L, W, H1),
+                            roof2Dir, arrowLen, '-0,4 q', true
+                        ));
+                    }
+                } else {
+                    // Techo Plano (Succión hacia arriba)
+                    mainGroup.add(createDistributedLoad(
+                        new THREE.Vector3(L, 0, H1), new THREE.Vector3(L, W, H1),
+                        new THREE.Vector3(0, 0, 1), arrowLen, '-0,8 q', true
+                    ));
+                }
+            }
+
+            // Actualizar centro de cámara
+            controls.target.set(L/2, W/2, H1/2);
+            controls.update();
+        }
+
+        // --- CONEXIÓN DE UI CON EL SISTEMA PARAMÉTRICO ---
+        const inputs = ['l', 'w', 'h1', 'h2', 'cumb', 'tipo'];
+        inputs.forEach(id => {
+            const el = document.getElementById('inp-' + id);
+            if (!el) return;
+            el.addEventListener('input', (e) => {
+                if (id !== 'tipo') {
+                    let val = parseFloat(e.target.value.replace(',', '.'));
+                    // Para la cumbrera permitimos llegar a 0 temporalmente para gatillar el cambio a 1 agua
+                    if(isNaN(val) || (id !== 'cumb' && val <= 0) || (id === 'cumb' && val < 0)) return;
+                    document.getElementById('val-' + id).textContent = val.toFixed(2).replace('.', ',') + ' m';
+                }
+                
+                let tipo = document.getElementById('inp-tipo').value;
+                const h2Input = document.getElementById('inp-h2');
+                const h2Val = document.getElementById('val-h2');
+                const cumbGroup = document.getElementById('group-cumb');
+                const cumbInput = document.getElementById('inp-cumb');
+                
+                const L = parseFloat(document.getElementById('inp-l').value.replace(',', '.'));
+                const W = parseFloat(document.getElementById('inp-w').value.replace(',', '.'));
+                const H1 = parseFloat(document.getElementById('inp-h1').value.replace(',', '.'));
+                const H2 = parseFloat(document.getElementById('inp-h2').value.replace(',', '.'));
+                let CumbPos = parseFloat(cumbInput.value.replace(',', '.'));
+                
+                // Si el usuario acaba de seleccionar "Asimétrico" en el menú, asegurar que la posición no sea 0 o W
+                if (e.target.id === 'inp-tipo' && tipo === '2aguas_asim' && (CumbPos <= 0 || CumbPos >= W)) {
+                    CumbPos = W * 0.3;
+                    cumbInput.value = CumbPos.toFixed(2);
+                    document.getElementById('val-cumb').textContent = CumbPos.toFixed(2).replace('.', ',') + ' m';
+                }
+                
+                // Lógica inteligente: Solo si está modificando la cumbrera manualmente y llega a 0 (o W), lo pasamos a 1 agua
+                if (e.target.id === 'inp-cumb' && tipo === '2aguas_asim' && (CumbPos === 0 || CumbPos === W)) {
+                    document.getElementById('inp-tipo').value = '1agua';
+                    tipo = '1agua';
+                }
+
+                // Mostrar/ocultar input de posición de cumbrera
+                if (tipo === '2aguas_asim') {
+                    cumbGroup.style.display = 'flex';
+                } else {
+                    cumbGroup.style.display = 'none';
+                }
+                
+                // Si es plana, forzamos H2 a 0 y deshabilitamos
+                if (tipo === 'plana') {
+                    h2Input.value = '0.00';
+                    h2Val.textContent = '0,00 m';
+                    h2Input.disabled = true;
+                } else {
+                    h2Input.disabled = false;
+                    // Si estaba en 0 (porque venía de plana), le damos un valor por defecto
+                    if (parseFloat(h2Input.value) === 0) {
+                        h2Input.value = (H1 + 5).toFixed(2);
+                        h2Val.textContent = (H1 + 5).toFixed(2).replace('.', ',') + ' m';
+                    }
+                }
+                
+                if(L > 0 && W > 0 && H1 > 0 && (tipo === 'plana' || H2 >= H1) && CumbPos >= 0 && CumbPos <= W) {
+                    updateStructure(tipo, L, W, H1, H2, CumbPos);
+                }
+            });
+        });
+
+        // Inicializar
+        updateStructure('2aguas_sim', 20, 20, 20, 25, 4);
+
+        // --- EVENTOS Y ANIMACIÓN ---
+        const buttons = document.querySelectorAll('.view-btn');
+        buttons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                buttons.forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+
+                const L = parseFloat(document.getElementById('inp-l').value.replace(',', '.'));
+                const W = parseFloat(document.getElementById('inp-w').value.replace(',', '.'));
+                
+                const view = e.target.dataset.view;
+                
+                if (view === 'free') {
+                    controls.enableRotate = true;
+                    return; // No mover la cámara, solo liberar controles
+                }
+                
+                // Si es una vista estándar, bloquear la rotación libre
+                controls.enableRotate = false;
+                
+                const targetPos = new THREE.Vector3();
+                const upVec = new THREE.Vector3(0, 0, 1);
+                
+                // Distancia dinámica basada en el tamaño del edificio
+                const d = Math.max(L, W) * 2;
+                const H1 = parseFloat(document.getElementById('inp-h1').value.replace(',', '.'));
+
+                switch(view) {
+                    case 'front': targetPos.set(L/2, -d, H1/2); break;
+                    case 'side': targetPos.set(L+d, W/2, H1/2); break;
+                    case 'top': targetPos.set(L/2, W/2, d); upVec.set(0, 1, 0); break;
+                    case 'iso': default: targetPos.set(L+d*0.8, -d*0.8, d*0.7); break;
+                }
+
+                gsap.to(camera.position, {
+                    x: targetPos.x, y: targetPos.y, z: targetPos.z,
+                    duration: 1.5, ease: "power3.inOut"
+                });
+                gsap.to(camera.up, {
+                    x: upVec.x, y: upVec.y, z: upVec.z,
+                    duration: 1.5, ease: "power3.inOut"
+                });
+            });
+        });
+
+        // Evento para el checkbox de cargas
+        document.getElementById('chk-cargas').addEventListener('change', () => {
+            const L = parseFloat(document.getElementById('inp-l').value.replace(',', '.'));
+            const W = parseFloat(document.getElementById('inp-w').value.replace(',', '.'));
+            const H1 = parseFloat(document.getElementById('inp-h1').value.replace(',', '.'));
+            const H2 = parseFloat(document.getElementById('inp-h2').value.replace(',', '.'));
+            const CumbPos = parseFloat(document.getElementById('inp-cumb').value.replace(',', '.'));
+            const tipo = document.getElementById('inp-tipo').value;
+            
+            if(L > 0 && W > 0 && H1 > 0 && (tipo === 'plana' || H2 >= H1) && CumbPos >= 0 && CumbPos <= W) {
+                updateStructure(tipo, L, W, H1, H2, CumbPos);
+            }
+        });
+
+        // Doble click para cambiar a modo libre
+        document.addEventListener('dblclick', (e) => {
+            // Ignorar si el doble click es en la UI
+            if (e.target.closest('#params-panel') || e.target.closest('#controls-panel')) return;
+            
+            buttons.forEach(b => b.classList.remove('active'));
+            document.querySelector('.view-btn[data-view="free"]').classList.add('active');
+            controls.enableRotate = true;
+        });
+
+        window.addEventListener('resize', () => {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = -frustumSize * aspect / 2;
+            camera.right = frustumSize * aspect / 2;
+            camera.top = frustumSize / 2;
+            camera.bottom = -frustumSize / 2;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            matLine.resolution.set(window.innerWidth, window.innerHeight);
+        }, false);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); 
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>

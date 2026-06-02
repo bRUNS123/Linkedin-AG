@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LinkedIn Email Extractor</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0e1a;
+    --surface: rgba(255,255,255,0.05);
+    --border: rgba(255,255,255,0.1);
+    --accent: #0a66c2;
+    --accent2: #00c6ff;
+    --text: #e8eaf0;
+    --muted: #8892a4;
+    --green: #22c55e;
+    --red: #ef4444;
+  }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    background-image: radial-gradient(ellipse at 20% 20%, rgba(10,102,194,0.15) 0%, transparent 50%),
+                      radial-gradient(ellipse at 80% 80%, rgba(0,198,255,0.08) 0%, transparent 50%);
+  }
+  header {
+    padding: 2rem 3rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,102,194,0.08);
+    backdrop-filter: blur(20px);
+  }
+  .logo {
+    width: 42px; height: 42px;
+    background: linear-gradient(135deg, #0a66c2, #00c6ff);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 1.1rem; color: white;
+  }
+  header h1 { font-size: 1.4rem; font-weight: 600; }
+  header p { font-size: 0.8rem; color: var(--muted); }
+  .container { max-width: 1100px; margin: 0 auto; padding: 2.5rem 2rem; }
+
+  /* Drop Zone */
+  .drop-zone {
+    border: 2px dashed rgba(10,102,194,0.5);
+    border-radius: 20px;
+    padding: 3.5rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: var(--surface);
+    backdrop-filter: blur(10px);
+    position: relative;
+    overflow: hidden;
+  }
+  .drop-zone::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(10,102,194,0.05), rgba(0,198,255,0.05));
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .drop-zone:hover::before, .drop-zone.drag-over::before { opacity: 1; }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent2);
+    transform: translateY(-2px);
+    box-shadow: 0 20px 60px rgba(10,102,194,0.2);
+  }
+  .drop-icon { font-size: 3rem; margin-bottom: 1rem; display: block; }
+  .drop-zone h2 { font-size: 1.3rem; margin-bottom: 0.5rem; }
+  .drop-zone p { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .btn {
+    background: linear-gradient(135deg, #0a66c2, #0d8fe0);
+    color: white; border: none; padding: 0.75rem 2rem;
+    border-radius: 50px; font-size: 0.95rem; font-weight: 500;
+    cursor: pointer; transition: all 0.2s;
+    box-shadow: 0 4px 20px rgba(10,102,194,0.3);
+  }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(10,102,194,0.5); }
+  .btn:active { transform: translateY(0); }
+  .btn-sm { padding: 0.5rem 1.2rem; font-size: 0.85rem; }
+  .btn-green { background: linear-gradient(135deg, #16a34a, #22c55e); box-shadow: 0 4px 20px rgba(34,197,94,0.3); }
+  .btn-green:hover { box-shadow: 0 8px 30px rgba(34,197,94,0.5); }
+  #fileInput { display: none; }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 2rem 0; }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.5rem;
+    text-align: center;
+    backdrop-filter: blur(10px);
+    transition: transform 0.2s;
+  }
+  .stat-card:hover { transform: translateY(-2px); }
+  .stat-number { font-size: 2.2rem; font-weight: 700; background: linear-gradient(135deg, #0a66c2, #00c6ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .stat-label { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+
+  /* Controls */
+  .controls {
+    display: flex; gap: 1rem; margin-bottom: 1.5rem;
+    flex-wrap: wrap; align-items: center;
+  }
+  .search-box {
+    flex: 1; min-width: 200px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 50px;
+    padding: 0.65rem 1.2rem;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .search-box:focus { border-color: var(--accent); }
+  .search-box::placeholder { color: var(--muted); }
+
+  /* Table */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: rgba(10,102,194,0.15);
+    padding: 1rem 1.2rem;
+    text-align: left;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr { transition: background 0.15s; }
+  tbody tr:hover { background: rgba(255,255,255,0.04); }
+  tbody td { padding: 0.9rem 1.2rem; font-size: 0.88rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  tbody tr:last-child td { border-bottom: none; }
+  .badge-email {
+    background: rgba(34,197,94,0.15);
+    color: var(--green);
+    padding: 0.25rem 0.7rem;
+    border-radius: 50px;
+    font-size: 0.82rem;
+    font-weight: 500;
+  }
+  .badge-no {
+    background: rgba(239,68,68,0.1);
+    color: var(--red);
+    padding: 0.25rem 0.7rem;
+    border-radius: 50px;
+    font-size: 0.82rem;
+  }
+  .copy-btn {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    padding: 0.2rem 0.6rem; border-radius: 6px; cursor: pointer;
+    font-size: 0.75rem; transition: all 0.2s;
+  }
+  .copy-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  /* Info box */
+  .info-box {
+    background: rgba(10,102,194,0.1);
+    border: 1px solid rgba(10,102,194,0.3);
+    border-radius: 14px;
+    padding: 1rem 1.5rem;
+    font-size: 0.87rem;
+    color: #93c5fd;
+    margin-bottom: 2rem;
+    display: flex; gap: 0.75rem; align-items: flex-start;
+  }
+  .hidden { display: none !important; }
+  #results { margin-top: 2rem; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 2rem; right: 2rem;
+    background: rgba(34,197,94,0.9);
+    color: white; padding: 0.75rem 1.5rem;
+    border-radius: 12px; font-size: 0.9rem;
+    transform: translateY(100px); opacity: 0;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+    z-index: 999;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">in</div>
+  <div>
+    <h1>LinkedIn Email Extractor</h1>
+    <p>Extrae correos de tu exportación oficial de LinkedIn</p>
+  </div>
+</header>
+
+<div class="container">
+  <div class="info-box">
+    <span>ℹ️</span>
+    <span>Sube el archivo <strong>Connections.csv</strong> (o el ZIP completo) que descargaste desde <strong>LinkedIn → Configuración → Privacidad de datos → Obtener copia de tus datos</strong>. Todo se procesa localmente en tu navegador.</span>
+  </div>
+
+  <div class="drop-zone" id="dropZone">
+    <span class="drop-icon">📁</span>
+    <h2>Arrastra tu archivo aquí</h2>
+    <p>Acepta <strong>Connections.csv</strong> o el <strong>ZIP</strong> completo de LinkedIn</p>
+    <button class="btn" onclick="document.getElementById('fileInput').click()">Seleccionar archivo</button>
+    <input type="file" id="fileInput" accept=".csv,.zip">
+  </div>
+
+  <div id="results" class="hidden">
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-number" id="totalCount">0</div>
+        <div class="stat-label">Total contactos</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="emailCount">0</div>
+        <div class="stat-label">Con email</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="pctCount">0%</div>
+        <div class="stat-label">Tasa de cobertura</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <input type="text" class="search-box" id="searchBox" placeholder="🔍 Buscar por nombre, empresa o email...">
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="onlyEmails" style="accent-color:#0a66c2;"> Solo con email
+      </label>
+      <button class="btn btn-sm btn-green" onclick="exportCSV()">⬇ Exportar CSV</button>
+      <button class="btn btn-sm" onclick="copyAllEmails()">📋 Copiar todos los emails</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Empresa</th>
+            <th>Cargo</th>
+            <th>Email</th>
+            <th>Conectado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <p style="text-align:center;color:var(--muted);font-size:0.8rem;margin-top:1rem;" id="rowCount"></p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let allContacts = [];
+
+// Drag & Drop
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  handleFile(e.dataTransfer.files[0]);
+});
+document.getElementById('fileInput').addEventListener('change', e => handleFile(e.target.files[0]));
+
+async function handleFile(file) {
+  if (!file) return;
+  if (file.name.endsWith('.zip')) {
+    showToast('⚠️ Para ZIP: extrae el archivo y sube Connections.csv directamente', 'orange');
+    return;
+  }
+  const text = await file.text();
+  parseCSV(text);
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  // Find header row (may have BOM or notes at top)
+  let headerIdx = lines.findIndex(l => l.toLowerCase().includes('first name') || l.toLowerCase().includes('nombre'));
+  if (headerIdx === -1) headerIdx = 0;
+
+  const headers = lines[headerIdx].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+  const get = (row, ...keys) => {
+    for (const k of keys) {
+      const idx = headers.findIndex(h => h.includes(k));
+      if (idx !== -1 && row[idx]) return row[idx].replace(/"/g, '').trim();
+    }
+    return '';
+  };
+
+  allContacts = [];
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const row = splitCSVLine(lines[i]);
+    if (row.length < 2) continue;
+    const contact = {
+      firstName: get(row, 'first'),
+      lastName: get(row, 'last'),
+      email: get(row, 'email', 'correo'),
+      company: get(row, 'company', 'empresa', 'compan'),
+      position: get(row, 'position', 'cargo', 'title'),
+      connected: get(row, 'connected', 'fecha')
+    };
+    contact.name = (contact.firstName + ' ' + contact.lastName).trim() || 'Desconocido';
+    allContacts.push(contact);
+  }
+
+  if (allContacts.length === 0) { showToast('❌ No se encontraron contactos', 'red'); return; }
+  updateStats();
+  renderTable(allContacts);
+  document.getElementById('results').classList.remove('hidden');
+  showToast(`✅ ${allContacts.length} contactos cargados`);
+}
+
+function splitCSVLine(line) {
+  const result = []; let cur = ''; let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+    else { cur += c; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function updateStats() {
+  const withEmail = allContacts.filter(c => c.email).length;
+  document.getElementById('totalCount').textContent = allContacts.length;
+  document.getElementById('emailCount').textContent = withEmail;
+  document.getElementById('pctCount').textContent = allContacts.length ? Math.round(withEmail / allContacts.length * 100) + '%' : '0%';
+}
+
+function renderTable(contacts) {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  contacts.forEach(c => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${esc(c.name)}</strong></td>
+      <td style="color:var(--muted)">${esc(c.company) || '—'}</td>
+      <td style="color:var(--muted);font-size:0.82rem">${esc(c.position) || '—'}</td>
+      <td>${c.email ? `<span class="badge-email">${esc(c.email)}</span>` : '<span class="badge-no">Sin email</span>'}</td>
+      <td style="color:var(--muted);font-size:0.82rem">${esc(c.connected) || '—'}</td>
+      <td>${c.email ? `<button class="copy-btn" onclick="copy('${esc(c.email)}')">Copiar</button>` : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('rowCount').textContent = `Mostrando ${contacts.length} contactos`;
+}
+
+function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function filterContacts() {
+  const q = document.getElementById('searchBox').value.toLowerCase();
+  const onlyEmails = document.getElementById('onlyEmails').checked;
+  let filtered = allContacts;
+  if (onlyEmails) filtered = filtered.filter(c => c.email);
+  if (q) filtered = filtered.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
+  renderTable(filtered);
+}
+document.getElementById('searchBox').addEventListener('input', filterContacts);
+document.getElementById('onlyEmails').addEventListener('change', filterContacts);
+
+function exportCSV() {
+  const onlyEmails = document.getElementById('onlyEmails').checked;
+  let data = allContacts;
+  if (onlyEmails) data = data.filter(c => c.email);
+  const rows = [['Nombre','Empresa','Cargo','Email','Conectado']];
+  data.forEach(c => rows.push([c.name, c.company, c.position, c.email, c.connected]));
+  const csv = rows.map(r => r.map(f => `"${(f||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  download('linkedin_emails.csv', csv, 'text/csv');
+  showToast(`✅ ${data.length} contactos exportados`);
+}
+
+function copyAllEmails() {
+  const emails = allContacts.filter(c => c.email).map(c => c.email).join('\n');
+  navigator.clipboard.writeText(emails).then(() => showToast(`📋 ${allContacts.filter(c=>c.email).length} emails copiados`));
+}
+
+function copy(text) {
+  navigator.clipboard.writeText(text).then(() => showToast('📋 Email copiado'));
+}
+
+function download(name, content, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], {type}));
+  a.download = name; a.click();
+}
+
+function showToast(msg, color = 'green') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = color === 'red' ? 'rgba(239,68,68,0.9)' : color === 'orange' ? 'rgba(234,179,8,0.9)' : 'rgba(34,197,94,0.9)';
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
