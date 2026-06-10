@@ -144,6 +144,20 @@ with tab2:
     
     st.dataframe(df_filtered[selected_cols], use_container_width=True, height=300)
 
+    st.markdown("### 📧 Exportar Correos")
+    with st.expander("Ver lista de todos los correos recopilados"):
+        all_emails = []
+        for correos_str in df_filtered["Correos"].dropna():
+            if correos_str:
+                for em in correos_str.split(","):
+                    em = em.strip()
+                    if em and em not in all_emails:
+                        all_emails.append(em)
+        
+        st.write(f"Se encontraron **{len(all_emails)}** correos únicos con los filtros actuales.")
+        if all_emails:
+            st.text_area("Copia estos correos (separados por coma):", value=", ".join(all_emails), height=150)
+
     st.markdown("### 👁️ Detalle del Post")
     if not df_filtered.empty:
         post_options = [f"[{idx}] {row.get('Autor', 'Desconocido')} - {row.get('Rol', '')}" for idx, row in df_filtered.iterrows()]
