@@ -36,6 +36,15 @@ def load_csv_data():
     df_struct = pd.DataFrame()
     if os.path.exists(STRUCTURAL_FILE):
         df_struct = pd.read_csv(STRUCTURAL_FILE)
+        
+    # Añadir columna 'Es Estructural' al df general si existe df_struct
+    if not df_struct.empty and not df_all.empty:
+        # Usamos 'Texto' o 'URL Perfil' como clave única para saber cuáles son estructurales
+        estructurales_urls = df_struct['URL Perfil'].tolist()
+        df_all['Es Estructural'] = df_all['URL Perfil'].apply(lambda x: 'Sí' if x in estructurales_urls else 'No')
+    else:
+        df_all['Es Estructural'] = 'No'
+
     return df_all, df_struct
 
 def load_training_data():
@@ -116,12 +125,14 @@ with tab2:
         contact_filter = st.sidebar.radio("Proviene de Contacto", ["Todos", "Sí", "No"], key="f_contact")
     with col_f2:
         has_email = st.sidebar.checkbox("Solo posts con correos", key="f_email")
+        only_structural = st.sidebar.checkbox("Solo ofertas estructurales", key="f_struct")
         search_query = st.sidebar.text_input("Buscador global (texto, empresa, rol):")
         
     df_filtered = df.copy()
     if ia_filter != "Todos": df_filtered = df_filtered[df_filtered["IA Validado"] == ia_filter]
     if contact_filter != "Todos": df_filtered = df_filtered[df_filtered["Es Contacto"] == contact_filter]
     if has_email: df_filtered = df_filtered[df_filtered["Correos"].notna() & (df_filtered["Correos"] != "")]
+    if only_structural: df_filtered = df_filtered[df_filtered["Es Estructural"] == 'Sí']
     if search_query:
         mask = df_filtered.apply(lambda row: row.astype(str).str.lower().str.contains(search_query.lower()).any(), axis=1)
         df_filtered = df_filtered[mask]
@@ -129,7 +140,7 @@ with tab2:
     st.subheader(f"Resultados ({len(df_filtered)})")
     
     selected_cols = st.multiselect("Columnas visibles:", df_filtered.columns, 
-                                   default=['Autor', 'Es Contacto', 'Correos', 'Rol', 'Empresa', 'Region'])
+                                   default=['Autor', 'Es Estructural', 'Es Contacto', 'Correos', 'Rol', 'Empresa', 'Region'])
     
     st.dataframe(df_filtered[selected_cols], use_container_width=True, height=300)
 
