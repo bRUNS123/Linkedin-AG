@@ -383,5 +383,12 @@
     "is_structural": false,
     "is_seeker": false,
     "labeled_at": "2026-06-12 20:17:26.112658"
+  },
+  {
+    "text": "En este Video 04 revisamos el diseño de anclajes bajo tres perspectivas:  Caso 1: Cargas sísmicas reducidas. Caso 2: Criterio del 50% de la capacidad flexural esperada de la columna (8.5.2)  Caso 3: Anclajes no dúctiles diseñados con cargas amplificadas mediante 0.7R1 (usando R=3).   El análisis se desarrolla aplicando exactamente los criterios normativos establecidos por la NCh2369:2025 para los casos 2 y 3.   El análisis numérico iterativo de los anclajes se realiza utilizando un método aprend",
+    "is_job_offer": false,
+    "is_structural": false,
+    "is_seeker": false,
+    "labeled_at": "2026-06-12 20:17:34.574624"
   }
 ]
