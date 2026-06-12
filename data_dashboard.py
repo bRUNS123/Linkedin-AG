@@ -316,7 +316,6 @@ with tab_ofertas:
 
             badges_html = " &nbsp; ".join(badges) if badges else "—"
             texto_completo = _disp(row.get('Texto'))
-            texto = texto_completo[:300] + ("..." if len(texto_completo) > 300 else "")
             empresa = _disp(row.get('Empresa')) or _disp(row.get('Empresa Contacto'))
 
             st.markdown(f'''
@@ -325,14 +324,12 @@ with tab_ofertas:
                 <p>{badges_html}</p>
                 <p><b>🛠️ Rol:</b> {_disp(row.get("Rol"))} | <b>🏢 Empresa:</b> {empresa} | <b>📍 Región:</b> {_disp(row.get("Region"))}</p>
                 <p><b>📧 Correos:</b> <span style="color:#00e676">{_disp(row.get("Correos"), "Ninguno")}</span></p>
-                <p>{texto}</p>
                 <a href="{row.get("URL Perfil", "#")}" target="_blank">🔗 Ver Perfil en LinkedIn</a>
             </div>
             ''', unsafe_allow_html=True)
 
-            if len(texto_completo) > 300:
-                with st.expander("📄 Ver texto completo"):
-                    st.write(texto_completo)
+            with st.expander("📄 Descripción completa", expanded=True):
+                st.write(texto_completo)
 
             existing = trained_map.get(row.get("Texto", ""))
             if existing:
