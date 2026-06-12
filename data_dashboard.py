@@ -108,6 +108,27 @@ def save_training_data(data):
         f.write(content)
     push_file_to_github(TRAINING_FILE, content.encode("utf-8"), "Actualizar training_data.json desde la app")
 
+def classify_post(text, is_job_offer, is_structural, is_seeker=False):
+    """Registra la clasificación manual de un post y la guarda (local + GitHub si está configurado)."""
+    new_item = {
+        "text": text,
+        "is_job_offer": is_job_offer,
+        "is_structural": is_structural,
+        "is_seeker": is_seeker,
+        "labeled_at": str(datetime.now())
+    }
+    st.session_state.training_data.append(new_item)
+    save_training_data(st.session_state.training_data)
+
+def classification_label(item):
+    if item.get("is_structural"):
+        return "🏗️ Oferta Estructural"
+    if item.get("is_seeker"):
+        return "🙋 Postulante (busca pega)"
+    if item.get("is_job_offer"):
+        return "✅ Oferta General"
+    return "🗑️ Basura / No es oferta"
+
 def _disp(val, default=""):
     """Convierte NaN/None/vacío a un valor por defecto para mostrar en la UI."""
     if val is None or (isinstance(val, float) and pd.isna(val)):
@@ -199,13 +220,11 @@ if df.empty:
     st.stop()
 
 # Inicializar variables de sesión para el entrenamiento
-if 'training_idx' not in st.session_state:
-    st.session_state.training_idx = 0
 if 'training_data' not in st.session_state:
     st.session_state.training_data = load_training_data()
     
 # Layout de Pestañas
-tab1, tab_top, tab2, tab3 = st.tabs(["📈 Dashboard General", "🏆 Top Ofertas", "🔎 Explorador de Datos", "🧠 Entrenamiento Bot"])
+tab1, tab_ofertas, tab2 = st.tabs(["📈 Dashboard", "📋 Ofertas", "🔎 Datos"])
 
 # ==========================================
 # PESTAÑA 1: DASHBOARD
@@ -244,32 +263,45 @@ with tab1:
 
 
 # ==========================================
-# PESTAÑA TOP: TOP OFERTAS
+# PESTAÑA OFERTAS: LISTADO + ENTRENAMIENTO
 # ==========================================
-with tab_top:
-    st.markdown("### 🏆 Top Ofertas")
-    st.write("Ranking combinado: score de IA + oferta estructural + contacto directo + correo disponible.")
+with tab_ofertas:
+    st.markdown("### 📋 Ofertas")
+    st.write("Ranking combinado: score de IA + oferta estructural + contacto directo + correo disponible. Clasifica cada post para entrenar al bot.")
+
+    trained_map = {item.get("text", ""): item for item in st.session_state.training_data}
+    total_pendientes = len(df[~df["Texto"].isin(trained_map.keys())])
 
     df_rank = df.copy()
     df_rank['Prioridad'] = df_rank.apply(compute_priority, axis=1)
     df_rank['_FechaDT'] = pd.to_datetime(df_rank['Fecha'], errors='coerce')
     df_rank = df_rank.sort_values(by=['Prioridad', '_FechaDT'], ascending=[False, False])
 
-    solo_accionables = st.checkbox("Solo mostrar accionables (correo o contacto directo)", key="f_top_accionable")
+    col_f1, col_f2, col_f3 = st.columns([1, 1, 1.4])
+    with col_f1:
+        solo_accionables = st.checkbox("Solo accionables (correo o contacto)", key="f_of_accionable")
+    with col_f2:
+        solo_pendientes = st.checkbox("Solo pendientes de clasificar", key="f_of_pendientes")
+    with col_f3:
+        top_n = st.slider("Cuántas mostrar:", min_value=5, max_value=50, value=10, step=5, key="f_of_topn")
+
     if solo_accionables:
         df_rank = df_rank[
             (df_rank["Correos"].notna() & (df_rank["Correos"] != "")) |
             (df_rank["Es Contacto"] == "Sí")
         ]
+    if solo_pendientes:
+        df_rank = df_rank[~df_rank["Texto"].isin(trained_map.keys())]
 
-    top_n = st.slider("Cuántas ofertas mostrar:", min_value=5, max_value=50, value=10, step=5)
+    st.caption(f"🧠 {len(st.session_state.training_data)} posts clasificados | ⏳ {total_pendientes} pendientes de revisar.")
+
     df_rank = df_rank.head(top_n)
 
     if df_rank.empty:
         st.info("No hay ofertas que cumplan los filtros seleccionados.")
     else:
         now = datetime.now()
-        for _, row in df_rank.iterrows():
+        for idx, row in df_rank.iterrows():
             badges = []
             if row.get('Es Estructural') == 'Sí':
                 badges.append("🏗️ Estructural")
@@ -297,6 +329,66 @@ with tab_top:
                 <a href="{row.get("URL Perfil", "#")}" target="_blank">🔗 Ver Perfil en LinkedIn</a>
             </div>
             ''', unsafe_allow_html=True)
+
+            if len(texto_completo) > 300:
+                with st.expander("📄 Ver texto completo"):
+                    st.write(texto_completo)
+
+            existing = trained_map.get(row.get("Texto", ""))
+            if existing:
+                st.caption(f"✅ Ya clasificado como: **{classification_label(existing)}**")
+            else:
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    if st.button("🏗️ Estructural", key=f"of_struct_{idx}", use_container_width=True, type="primary"):
+                        classify_post(row.get("Texto", ""), True, True)
+                        st.rerun()
+                with c2:
+                    if st.button("✅ Oferta General", key=f"of_general_{idx}", use_container_width=True):
+                        classify_post(row.get("Texto", ""), True, False)
+                        st.rerun()
+                with c3:
+                    if st.button("🙋 Postulante (busca pega)", key=f"of_seeker_{idx}", use_container_width=True):
+                        classify_post(row.get("Texto", ""), False, False, is_seeker=True)
+                        st.rerun()
+                with c4:
+                    if st.button("🗑️ Basura / No es oferta", key=f"of_trash_{idx}", use_container_width=True):
+                        classify_post(row.get("Texto", ""), False, False)
+                        st.rerun()
+
+            st.markdown("---")
+
+    with st.expander("⚙️ Gestión de datos de entrenamiento"):
+        if github_sync_enabled():
+            st.caption("✅ Cada clasificación se guarda automáticamente en GitHub, así que tú y tu colega comparten el mismo progreso sin pasos manuales.")
+        else:
+            st.caption("⚠️ La sincronización con GitHub no está configurada: este progreso solo vive en esta sesión y se perderá al reiniciar la app.")
+
+        if len(st.session_state.training_data) > 0:
+            json_string = json.dumps(st.session_state.training_data, ensure_ascii=False, indent=2)
+            st.download_button(
+                label="⬇️ Descargar `training_data.json`",
+                file_name="training_data.json",
+                mime="application/json",
+                data=json_string
+            )
+
+        st.markdown("##### 🔄 Fusionar entrenamiento de un colega")
+        st.caption("Sube un `training_data.json` (descargado por tu colega u otra sesión) para fusionarlo con el progreso actual.")
+        uploaded_training = st.file_uploader("Subir training_data.json", type="json", key="training_uploader")
+        if uploaded_training is not None:
+            try:
+                incoming = json.load(uploaded_training)
+                existing_texts = {item.get("text", "") for item in st.session_state.training_data}
+                new_items = [item for item in incoming if item.get("text", "") not in existing_texts]
+                if new_items:
+                    st.session_state.training_data.extend(new_items)
+                    save_training_data(st.session_state.training_data)
+                    st.success(f"Se fusionaron {len(new_items)} clasificaciones nuevas. Total: {len(st.session_state.training_data)}.")
+                else:
+                    st.info("El archivo subido no contiene clasificaciones nuevas.")
+            except (json.JSONDecodeError, AttributeError):
+                st.error("El archivo subido no es un training_data.json válido.")
 
 
 # ==========================================
@@ -399,110 +491,3 @@ with tab2:
                 <a href="{post_row.get("URL Perfil", "#")}" target="_blank">🔗 Ver Perfil en LinkedIn</a>
             </div>
             ''', unsafe_allow_html=True)
-
-
-# ==========================================
-# PESTAÑA 3: ENTRENAMIENTO
-# ==========================================
-with tab3:
-    st.markdown("### 🧠 Centro de Entrenamiento del Bot")
-    st.write("Enséñale a la IA clasificando posts manualmente. Estos datos se guardarán en `training_data.json` para mejorar la precisión futura del bot.")
-    
-    # Preparar datos sin entrenar
-    trained_texts = [item.get("text", "") for item in st.session_state.training_data]
-    df_untrained = df[~df["Texto"].isin(trained_texts)]
-    
-    if df_untrained.empty:
-        st.success("¡Felicidades! Has revisado todos los posts exportados actualmente.")
-    else:
-        # Asegurar que el index no se pase de largo
-        if st.session_state.training_idx >= len(df_untrained):
-            st.session_state.training_idx = 0
-            
-        current_post = df_untrained.iloc[st.session_state.training_idx]
-        
-        st.progress((st.session_state.training_idx) / len(df_untrained))
-        st.write(f"Viendo post **{st.session_state.training_idx + 1}** de **{len(df_untrained)}** sin clasificar.")
-        
-        st.markdown(f'''
-        <div class="post-card">
-            <p><b>Texto del Post:</b></p>
-            <p><i>"{current_post.get("Texto", "")}"</i></p>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        st.markdown("**¿Cómo clasificarías este post?**")
-        c1, c2, c3, c4, c5 = st.columns(5)
-
-        def save_classification(label, is_structural, is_seeker=False):
-            new_item = {
-                "text": current_post.get("Texto", ""),
-                "is_job_offer": label,
-                "is_structural": is_structural,
-                "is_seeker": is_seeker,
-                "labeled_at": str(datetime.now())
-            }
-            st.session_state.training_data.append(new_item)
-            save_training_data(st.session_state.training_data)
-            # Avanzar al siguiente
-            st.session_state.training_idx += 1
-
-        with c1:
-            if st.button("🏗️ Oferta Estructural", use_container_width=True, type="primary"):
-                save_classification(True, True)
-                st.rerun()
-        with c2:
-            if st.button("✅ Oferta General (No Estructural)", use_container_width=True):
-                save_classification(True, False)
-                st.rerun()
-        with c3:
-            if st.button("🙋 Postulante (busca pega)", use_container_width=True):
-                save_classification(False, False, is_seeker=True)
-                st.rerun()
-        with c4:
-            if st.button("🗑️ Basura / No es oferta", use_container_width=True):
-                save_classification(False, False)
-                st.rerun()
-        with c5:
-            if st.button("⏭️ Saltar", use_container_width=True):
-                st.session_state.training_idx += 1
-                st.rerun()
-
-    st.markdown("---")
-    st.markdown("#### Datos de Entrenamiento")
-    st.write(f"Has clasificado un total de **{len(st.session_state.training_data)}** posts.")
-
-    if github_sync_enabled():
-        st.caption("✅ Cada clasificación se guarda automáticamente en GitHub, así que tú y tu colega comparten el mismo progreso sin pasos manuales.")
-    else:
-        st.caption("⚠️ La sincronización con GitHub no está configurada: este progreso solo vive en esta sesión y se perderá al reiniciar la app.")
-
-    # Boton de descarga para respaldar/compartir el progreso
-    if len(st.session_state.training_data) > 0:
-        json_string = json.dumps(st.session_state.training_data, ensure_ascii=False, indent=2)
-        st.download_button(
-            label="⬇️ Descargar `training_data.json`",
-            file_name="training_data.json",
-            mime="application/json",
-            data=json_string
-        )
-
-    st.markdown("##### 🔄 Fusionar entrenamiento de un colega")
-    st.caption(
-        "Sube un `training_data.json` (descargado por tu colega u otra sesión) para fusionarlo "
-        "con el progreso actual."
-    )
-    uploaded_training = st.file_uploader("Subir training_data.json", type="json", key="training_uploader")
-    if uploaded_training is not None:
-        try:
-            incoming = json.load(uploaded_training)
-            existing_texts = {item.get("text", "") for item in st.session_state.training_data}
-            new_items = [item for item in incoming if item.get("text", "") not in existing_texts]
-            if new_items:
-                st.session_state.training_data.extend(new_items)
-                save_training_data(st.session_state.training_data)
-                st.success(f"Se fusionaron {len(new_items)} clasificaciones nuevas. Total: {len(st.session_state.training_data)}.")
-            else:
-                st.info("El archivo subido no contiene clasificaciones nuevas.")
-        except (json.JSONDecodeError, AttributeError):
-            st.error("El archivo subido no es un training_data.json válido.")
