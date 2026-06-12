@@ -2,6 +2,7 @@
 __pycache__/
 *.json
 *.csv
+.streamlit/secrets.toml
 
 # Datos compartidos con la app de Streamlit Cloud
 !training_data.json

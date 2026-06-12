@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import os
 import json
+import base64
+import requests
 from datetime import datetime
 
 # Configuracion de pagina
@@ -33,6 +35,45 @@ LEADS_COLUMNS = [
     "Region", "Comuna", "Fecha Post", "URL Perfil", "Contactado", "Fecha Agregado"
 ]
 
+def _github_config():
+    """Lee las credenciales de GitHub desde st.secrets. Devuelve (token, repo, branch) o (None, None, None)."""
+    try:
+        gh = st.secrets["github"]
+        return gh["token"], gh.get("repo", "bRUNS123/Linkedin-AG"), gh.get("branch", "master")
+    except (KeyError, FileNotFoundError):
+        return None, None, None
+
+def github_sync_enabled():
+    token, _, _ = _github_config()
+    return token is not None
+
+def push_file_to_github(path, content_bytes, message):
+    """Crea o actualiza un archivo en el repo de GitHub para que los datos persistan
+    entre reinicios de Streamlit Cloud. Si no hay credenciales configuradas, no hace nada."""
+    token, repo, branch = _github_config()
+    if not token:
+        return False
+
+    api_url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+
+    try:
+        get_resp = requests.get(api_url, headers=headers, params={"ref": branch}, timeout=10)
+        sha = get_resp.json().get("sha") if get_resp.status_code == 200 else None
+
+        payload = {
+            "message": message,
+            "content": base64.b64encode(content_bytes).decode("utf-8"),
+            "branch": branch,
+        }
+        if sha:
+            payload["sha"] = sha
+
+        put_resp = requests.put(api_url, headers=headers, json=payload, timeout=10)
+        return put_resp.status_code in (200, 201)
+    except requests.RequestException:
+        return False
+
 @st.cache_data(ttl=60)
 def load_csv_data():
     if not os.path.exists(ALL_OFFERS_FILE):
@@ -62,8 +103,10 @@ def load_training_data():
     return []
 
 def save_training_data(data):
+    content = json.dumps(data, ensure_ascii=False, indent=2)
     with open(TRAINING_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write(content)
+    push_file_to_github(TRAINING_FILE, content.encode("utf-8"), "Actualizar training_data.json desde la app")
 
 def _disp(val, default=""):
     """Convierte NaN/None/vacío a un valor por defecto para mostrar en la UI."""
@@ -99,6 +142,8 @@ def load_leads():
 
 def save_leads(df_leads):
     df_leads.to_csv(LEADS_FILE, index=False)
+    content = df_leads.to_csv(index=False)
+    push_file_to_github(LEADS_FILE, content.encode("utf-8"), "Actualizar Contactos_Emails.csv desde la app")
 
 def update_leads_from_df(df_all):
     """Agrega a la base de contactos los correos nuevos encontrados en df_all. Devuelve (n_nuevos, leads_df)."""
@@ -142,6 +187,11 @@ def update_leads_from_df(df_all):
     return len(new_rows), leads_df
 
 st.title("📊 Panel de Inteligencia - LinkedIn Scraper")
+
+if github_sync_enabled():
+    st.sidebar.success("🔄 Sincronización con GitHub activa")
+else:
+    st.sidebar.warning("⚪ Sin sincronización con GitHub (los cambios solo viven en esta sesión)")
 
 df, df_struct = load_csv_data()
 if df.empty:
@@ -422,6 +472,11 @@ with tab3:
     st.markdown("#### Datos de Entrenamiento")
     st.write(f"Has clasificado un total de **{len(st.session_state.training_data)}** posts.")
 
+    if github_sync_enabled():
+        st.caption("✅ Cada clasificación se guarda automáticamente en GitHub, así que tú y tu colega comparten el mismo progreso sin pasos manuales.")
+    else:
+        st.caption("⚠️ La sincronización con GitHub no está configurada: este progreso solo vive en esta sesión y se perderá al reiniciar la app.")
+
     # Boton de descarga para respaldar/compartir el progreso
     if len(st.session_state.training_data) > 0:
         json_string = json.dumps(st.session_state.training_data, ensure_ascii=False, indent=2)
@@ -435,8 +490,7 @@ with tab3:
     st.markdown("##### 🔄 Fusionar entrenamiento de un colega")
     st.caption(
         "Sube un `training_data.json` (descargado por tu colega u otra sesión) para fusionarlo "
-        "con el progreso actual. Luego haz commit/push del archivo para que quede guardado "
-        "permanentemente en el repositorio."
+        "con el progreso actual."
     )
     uploaded_training = st.file_uploader("Subir training_data.json", type="json", key="training_uploader")
     if uploaded_training is not None:
