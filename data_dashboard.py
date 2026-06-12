@@ -27,6 +27,11 @@ st.markdown("""
 ALL_OFFERS_FILE = "Todas_Ofertas.csv"
 STRUCTURAL_FILE = "Ofertas_Estructurales.csv"
 TRAINING_FILE = "training_data.json"
+LEADS_FILE = "Contactos_Emails.csv"
+LEADS_COLUMNS = [
+    "Correo", "Autor", "Empresa", "Cargo", "Es Estructural", "Es Contacto",
+    "Region", "Comuna", "Fecha Post", "URL Perfil", "Contactado", "Fecha Agregado"
+]
 
 @st.cache_data(ttl=60)
 def load_csv_data():
@@ -52,13 +57,89 @@ def load_training_data():
         try:
             with open(TRAINING_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, OSError):
             return []
     return []
 
 def save_training_data(data):
     with open(TRAINING_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def _disp(val, default=""):
+    """Convierte NaN/None/vacío a un valor por defecto para mostrar en la UI."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return default
+    val = str(val).strip()
+    return val if val else default
+
+def compute_priority(row):
+    """Combina score de IA, oferta estructural, contacto directo y disponibilidad de correo."""
+    try:
+        score = float(row.get('Score', 0) or 0)
+    except (ValueError, TypeError):
+        score = 0.0
+
+    priority = score * 0.4
+    if row.get('Es Estructural') == 'Sí':
+        priority += 0.25
+    if row.get('Es Contacto') == 'Sí':
+        priority += 0.20
+    correos = row.get('Correos')
+    if isinstance(correos, str) and correos.strip():
+        priority += 0.15
+    return priority
+
+def load_leads():
+    if os.path.exists(LEADS_FILE):
+        try:
+            return pd.read_csv(LEADS_FILE)
+        except (pd.errors.EmptyDataError, OSError):
+            return pd.DataFrame(columns=LEADS_COLUMNS)
+    return pd.DataFrame(columns=LEADS_COLUMNS)
+
+def save_leads(df_leads):
+    df_leads.to_csv(LEADS_FILE, index=False)
+
+def update_leads_from_df(df_all):
+    """Agrega a la base de contactos los correos nuevos encontrados en df_all. Devuelve (n_nuevos, leads_df)."""
+    leads_df = load_leads()
+    existing_emails = set(leads_df["Correo"].astype(str).str.lower()) if not leads_df.empty else set()
+
+    new_rows = []
+    today = datetime.now().strftime("%Y-%m-%d")
+    for _, row in df_all.iterrows():
+        correos = row.get("Correos")
+        if not isinstance(correos, str) or not correos.strip():
+            continue
+        es_contacto = row.get("Es Contacto") == "Sí"
+        empresa_contacto = _disp(row.get("Empresa Contacto"))
+        empresa = empresa_contacto if (es_contacto and empresa_contacto) else _disp(row.get("Empresa"))
+        cargo = _disp(row.get("Cargo Contacto")) if es_contacto else ""
+        for email in correos.split(","):
+            email = email.strip()
+            if not email or email.lower() in existing_emails:
+                continue
+            new_rows.append({
+                "Correo": email,
+                "Autor": _disp(row.get("Autor")),
+                "Empresa": empresa,
+                "Cargo": cargo,
+                "Es Estructural": row.get("Es Estructural", "No"),
+                "Es Contacto": row.get("Es Contacto", "No"),
+                "Region": _disp(row.get("Region")),
+                "Comuna": _disp(row.get("Comuna")),
+                "Fecha Post": _disp(row.get("Fecha")),
+                "URL Perfil": _disp(row.get("URL Perfil")),
+                "Contactado": False,
+                "Fecha Agregado": today,
+            })
+            existing_emails.add(email.lower())
+
+    if new_rows:
+        leads_df = pd.concat([leads_df, pd.DataFrame(new_rows)], ignore_index=True)
+        save_leads(leads_df)
+
+    return len(new_rows), leads_df
 
 st.title("📊 Panel de Inteligencia - LinkedIn Scraper")
 
@@ -74,7 +155,7 @@ if 'training_data' not in st.session_state:
     st.session_state.training_data = load_training_data()
     
 # Layout de Pestañas
-tab1, tab2, tab3 = st.tabs(["📈 Dashboard General", "🔎 Explorador de Datos", "🧠 Entrenamiento Bot"])
+tab1, tab_top, tab2, tab3 = st.tabs(["📈 Dashboard General", "🏆 Top Ofertas", "🔎 Explorador de Datos", "🧠 Entrenamiento Bot"])
 
 # ==========================================
 # PESTAÑA 1: DASHBOARD
@@ -113,6 +194,62 @@ with tab1:
 
 
 # ==========================================
+# PESTAÑA TOP: TOP OFERTAS
+# ==========================================
+with tab_top:
+    st.markdown("### 🏆 Top Ofertas")
+    st.write("Ranking combinado: score de IA + oferta estructural + contacto directo + correo disponible.")
+
+    df_rank = df.copy()
+    df_rank['Prioridad'] = df_rank.apply(compute_priority, axis=1)
+    df_rank['_FechaDT'] = pd.to_datetime(df_rank['Fecha'], errors='coerce')
+    df_rank = df_rank.sort_values(by=['Prioridad', '_FechaDT'], ascending=[False, False])
+
+    solo_accionables = st.checkbox("Solo mostrar accionables (correo o contacto directo)", key="f_top_accionable")
+    if solo_accionables:
+        df_rank = df_rank[
+            (df_rank["Correos"].notna() & (df_rank["Correos"] != "")) |
+            (df_rank["Es Contacto"] == "Sí")
+        ]
+
+    top_n = st.slider("Cuántas ofertas mostrar:", min_value=5, max_value=50, value=10, step=5)
+    df_rank = df_rank.head(top_n)
+
+    if df_rank.empty:
+        st.info("No hay ofertas que cumplan los filtros seleccionados.")
+    else:
+        now = datetime.now()
+        for _, row in df_rank.iterrows():
+            badges = []
+            if row.get('Es Estructural') == 'Sí':
+                badges.append("🏗️ Estructural")
+            if row.get('Es Contacto') == 'Sí':
+                badges.append(f"🤝 Contacto directo ({row.get('Empresa Contacto', '')} - {row.get('Cargo Contacto', '')})")
+            correos = row.get('Correos')
+            if isinstance(correos, str) and correos.strip():
+                badges.append("📧 Tiene correo")
+            fecha_dt = row.get('_FechaDT')
+            if pd.notna(fecha_dt) and (now - fecha_dt).days <= 7:
+                badges.append("🕐 Reciente")
+
+            badges_html = " &nbsp; ".join(badges) if badges else "—"
+            texto_completo = _disp(row.get('Texto'))
+            texto = texto_completo[:300] + ("..." if len(texto_completo) > 300 else "")
+            empresa = _disp(row.get('Empresa')) or _disp(row.get('Empresa Contacto'))
+
+            st.markdown(f'''
+            <div class="post-card">
+                <h4>👤 {_disp(row.get("Autor"))} <span style="float:right; color:#00e676;">Prioridad: {row.get("Prioridad", 0):.2f}</span></h4>
+                <p>{badges_html}</p>
+                <p><b>🛠️ Rol:</b> {_disp(row.get("Rol"))} | <b>🏢 Empresa:</b> {empresa} | <b>📍 Región:</b> {_disp(row.get("Region"))}</p>
+                <p><b>📧 Correos:</b> <span style="color:#00e676">{_disp(row.get("Correos"), "Ninguno")}</span></p>
+                <p>{texto}</p>
+                <a href="{row.get("URL Perfil", "#")}" target="_blank">🔗 Ver Perfil en LinkedIn</a>
+            </div>
+            ''', unsafe_allow_html=True)
+
+
+# ==========================================
 # PESTAÑA 2: EXPLORADOR
 # ==========================================
 with tab2:
@@ -144,23 +281,58 @@ with tab2:
     
     st.dataframe(df_filtered[selected_cols], use_container_width=True, height=300)
 
-    st.markdown("### 📧 Exportar Correos")
-    with st.expander("Ver lista de todos los correos recopilados"):
-        all_emails = []
-        for correos_str in df_filtered["Correos"].dropna():
-            if correos_str:
-                for em in correos_str.split(","):
-                    em = em.strip()
-                    if em and em not in all_emails:
-                        all_emails.append(em)
-        
-        st.write(f"Se encontraron **{len(all_emails)}** correos únicos con los filtros actuales.")
-        if all_emails:
-            st.text_area("Copia estos correos (separados por coma):", value=", ".join(all_emails), height=150)
+    st.markdown("### 📧 Base de Contactos")
+
+    if 'leads_df' not in st.session_state:
+        st.session_state.leads_df = load_leads()
+
+    if st.button("🔄 Actualizar base desde datos actuales"):
+        n_new, st.session_state.leads_df = update_leads_from_df(df)
+        st.success(f"Se agregaron {n_new} correos nuevos a la base.")
+
+    leads_df = st.session_state.leads_df
+
+    col_l1, col_l2 = st.columns(2)
+    with col_l1:
+        solo_no_contactados = st.checkbox("Solo no contactados", key="f_leads_no_contact")
+    with col_l2:
+        solo_estructural_leads = st.checkbox("Solo estructurales", key="f_leads_struct")
+    leads_search = st.text_input("Buscar en base de contactos:", key="f_leads_search")
+
+    leads_filtered = leads_df.copy()
+    if not leads_filtered.empty:
+        if solo_no_contactados:
+            leads_filtered = leads_filtered[leads_filtered["Contactado"] == False]
+        if solo_estructural_leads:
+            leads_filtered = leads_filtered[leads_filtered["Es Estructural"] == "Sí"]
+        if leads_search:
+            mask = leads_filtered.apply(lambda row: row.astype(str).str.lower().str.contains(leads_search.lower()).any(), axis=1)
+            leads_filtered = leads_filtered[mask]
+
+    st.write(f"**{len(leads_filtered)}** contactos mostrados (de **{len(leads_df)}** totales en la base).")
+
+    edited_leads = st.data_editor(
+        leads_filtered,
+        column_config={"Contactado": st.column_config.CheckboxColumn("Contactado")},
+        disabled=[c for c in LEADS_COLUMNS if c != "Contactado"],
+        use_container_width=True,
+        height=300,
+        key="leads_editor",
+    )
+
+    if st.button("💾 Guardar cambios"):
+        leads_df.update(edited_leads)
+        st.session_state.leads_df = leads_df
+        save_leads(leads_df)
+        st.success("Cambios guardados.")
+
+    if not leads_df.empty:
+        csv_bytes = leads_df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Descargar Contactos_Emails.csv", data=csv_bytes, file_name="Contactos_Emails.csv", mime="text/csv")
 
     st.markdown("### 👁️ Detalle del Post")
     if not df_filtered.empty:
-        post_options = [f"[{idx}] {row.get('Autor', 'Desconocido')} - {row.get('Rol', '')}" for idx, row in df_filtered.iterrows()]
+        post_options = [f"[{idx}] {_disp(row.get('Autor'), 'Desconocido')} - {_disp(row.get('Rol'))}" for idx, row in df_filtered.iterrows()]
         selected_post_str = st.selectbox("Selecciona un post para leer:", post_options)
         if selected_post_str:
             idx = int(selected_post_str.split(']')[0].replace('[', ''))
@@ -168,12 +340,12 @@ with tab2:
             
             st.markdown(f'''
             <div class="post-card">
-                <h4>👤 {post_row.get("Autor", "")}</h4>
-                <p><b>🏢 Empresa Contacto:</b> {post_row.get("Empresa Contacto", "")} | <b>📍 Región:</b> {post_row.get("Region", "")}</p>
-                <p><b>📧 Correos Detectados:</b> <span style="color:#00e676">{post_row.get("Correos", "Ninguno")}</span></p>
-                <p><b>🤖 IA Score:</b> {post_row.get("Score", 0)} | <b>🛠️ Rol:</b> {post_row.get("Rol", "")}</p>
+                <h4>👤 {_disp(post_row.get("Autor"))}</h4>
+                <p><b>🏢 Empresa Contacto:</b> {_disp(post_row.get("Empresa Contacto"))} | <b>📍 Región:</b> {_disp(post_row.get("Region"))}</p>
+                <p><b>📧 Correos Detectados:</b> <span style="color:#00e676">{_disp(post_row.get("Correos"), "Ninguno")}</span></p>
+                <p><b>🤖 IA Score:</b> {post_row.get("Score", 0)} | <b>🛠️ Rol:</b> {_disp(post_row.get("Rol"))}</p>
                 <hr>
-                <p>{post_row.get("Texto", "Sin texto")}</p>
+                <p>{_disp(post_row.get("Texto"), "Sin texto")}</p>
                 <a href="{post_row.get("URL Perfil", "#")}" target="_blank">🔗 Ver Perfil en LinkedIn</a>
             </div>
             ''', unsafe_allow_html=True)
@@ -210,20 +382,21 @@ with tab3:
         ''', unsafe_allow_html=True)
         
         st.markdown("**¿Cómo clasificarías este post?**")
-        c1, c2, c3, c4 = st.columns(4)
-        
-        def save_classification(label, is_structural):
+        c1, c2, c3, c4, c5 = st.columns(5)
+
+        def save_classification(label, is_structural, is_seeker=False):
             new_item = {
                 "text": current_post.get("Texto", ""),
                 "is_job_offer": label,
                 "is_structural": is_structural,
+                "is_seeker": is_seeker,
                 "labeled_at": str(datetime.now())
             }
             st.session_state.training_data.append(new_item)
             save_training_data(st.session_state.training_data)
             # Avanzar al siguiente
             st.session_state.training_idx += 1
-        
+
         with c1:
             if st.button("🏗️ Oferta Estructural", use_container_width=True, type="primary"):
                 save_classification(True, True)
@@ -233,10 +406,14 @@ with tab3:
                 save_classification(True, False)
                 st.rerun()
         with c3:
+            if st.button("🙋 Postulante (busca pega)", use_container_width=True):
+                save_classification(False, False, is_seeker=True)
+                st.rerun()
+        with c4:
             if st.button("🗑️ Basura / No es oferta", use_container_width=True):
                 save_classification(False, False)
                 st.rerun()
-        with c4:
+        with c5:
             if st.button("⏭️ Saltar", use_container_width=True):
                 st.session_state.training_idx += 1
                 st.rerun()
@@ -244,13 +421,34 @@ with tab3:
     st.markdown("---")
     st.markdown("#### Datos de Entrenamiento")
     st.write(f"Has clasificado un total de **{len(st.session_state.training_data)}** posts.")
-    
-    # Boton de descarga para usuarios en la nube
+
+    # Boton de descarga para respaldar/compartir el progreso
     if len(st.session_state.training_data) > 0:
         json_string = json.dumps(st.session_state.training_data, ensure_ascii=False, indent=2)
         st.download_button(
-            label="⬇️ Descargar `training_data.json` (Para uso en Streamlit Cloud)",
+            label="⬇️ Descargar `training_data.json`",
             file_name="training_data.json",
             mime="application/json",
             data=json_string
         )
+
+    st.markdown("##### 🔄 Fusionar entrenamiento de un colega")
+    st.caption(
+        "Sube un `training_data.json` (descargado por tu colega u otra sesión) para fusionarlo "
+        "con el progreso actual. Luego haz commit/push del archivo para que quede guardado "
+        "permanentemente en el repositorio."
+    )
+    uploaded_training = st.file_uploader("Subir training_data.json", type="json", key="training_uploader")
+    if uploaded_training is not None:
+        try:
+            incoming = json.load(uploaded_training)
+            existing_texts = {item.get("text", "") for item in st.session_state.training_data}
+            new_items = [item for item in incoming if item.get("text", "") not in existing_texts]
+            if new_items:
+                st.session_state.training_data.extend(new_items)
+                save_training_data(st.session_state.training_data)
+                st.success(f"Se fusionaron {len(new_items)} clasificaciones nuevas. Total: {len(st.session_state.training_data)}.")
+            else:
+                st.info("El archivo subido no contiene clasificaciones nuevas.")
+        except (json.JSONDecodeError, AttributeError):
+            st.error("El archivo subido no es un training_data.json válido.")

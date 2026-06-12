@@ -42,20 +42,39 @@ def is_on_challenge(page) -> bool:
 def ensure_login(page, context):
     email = os.getenv("LINKEDIN_EMAIL")
     password = os.getenv("LINKEDIN_PASSWORD")
-    if not email or not password:
-        raise ValueError("Faltan LINKEDIN_EMAIL o LINKEDIN_PASSWORD en tu .env")
+    li_at = os.getenv("LINKEDIN_LI_AT")
+    
+    if li_at:
+        context.add_cookies([{"name": "li_at", "value": li_at, "domain": ".www.linkedin.com", "path": "/"}])
+        print_status("🍪 Usando cookie li_at para sesión automática...")
 
-    page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
+    if not email and not password and not li_at:
+        raise ValueError("Faltan LINKEDIN_EMAIL/PASSWORD o LINKEDIN_LI_AT en tu .env")
+
+    try:
+        page.goto("https://www.linkedin.com/", wait_until="domcontentloaded")
+        page.wait_for_timeout(1500)
+        page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
+    except Exception as e:
+        print_status(f"⚠️ Advertencia al navegar: {e}")
     page.wait_for_timeout(1200)
 
     if is_on_login(page):
         print_status("🔐 No hay sesión activa → login automático (.env) ...")
         page.goto(LINKEDIN_LOGIN_URL, wait_until="domcontentloaded")
 
-        page.wait_for_selector("#username", timeout=15000)
-        page.fill("#username", email)
-        page.fill("#password", password)
-        page.click("button[type='submit']")
+        page.wait_for_selector('input[type="email"], input[autocomplete*="username"], #username, #session_key', timeout=15000)
+        user_input = page.locator('input[type="email"], input[autocomplete*="username"], #username, #session_key').first
+        pass_input = page.locator('input[type="password"], input[autocomplete*="current-password"], #password, #session_password').first
+        
+        user_input.fill(email)
+        pass_input.fill(password)
+        
+        submit_btn = page.locator('button[type="submit"]')
+        if submit_btn.count() > 0:
+            submit_btn.first.click()
+        else:
+            pass_input.press("Enter")
 
         page.wait_for_timeout(2500)
 

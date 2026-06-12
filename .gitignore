@@ -2,3 +2,9 @@
 __pycache__/
 *.json
 *.csv
+
+# Datos compartidos con la app de Streamlit Cloud
+!training_data.json
+!Contactos_Emails.csv
+!Ofertas_Estructurales.csv
+!Todas_Ofertas.csv

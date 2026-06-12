@@ -31,8 +31,8 @@ from playwright._impl._errors import TargetClosedError
 
 # --- Modulos locales ---
 from process_locations import find_locations_in_text
-from process_locations import find_locations_in_text
 from detect_jobs import detect_job_offer
+from contact_matcher import match_author, is_spam_author, load_contacts
 import train_model
 
 # ===================== CONFIGURACION =====================
@@ -46,6 +46,9 @@ KEYWORDS_FILE = "job_keywords.json"
 TRAINING_FILE = "training_data.json"
 STRUCTURAL_CSV = "Ofertas_Estructurales.csv"
 ALL_OFFERS_CSV = "Todas_Ofertas.csv"
+
+NETWORK_STATS_FILE = "network_stats.json"
+LINKEDIN_NETWORK_URL = "https://www.linkedin.com/mynetwork/"
 
 LINKEDIN_FEED_URL = "https://www.linkedin.com/feed/"
 LINKEDIN_LOGIN_URL = "https://www.linkedin.com/login"
@@ -220,18 +223,29 @@ class ScraperEngine:
     def _ensure_login(self, page, context):
         email = os.getenv("LINKEDIN_EMAIL")
         password = os.getenv("LINKEDIN_PASSWORD")
-        if not email or not password:
-            raise ValueError("Faltan LINKEDIN_EMAIL o LINKEDIN_PASSWORD en .env")
+        li_at = os.getenv("LINKEDIN_LI_AT")
+        
+        if li_at and not Path(STATE_FILE).exists():
+            context.add_cookies([{"name": "li_at", "value": li_at, "domain": ".www.linkedin.com", "path": "/"}])
+            self.log("Usando cookie li_at para sesion automatica (primera sesion).")
 
-        page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
+        if not email and not password and not li_at:
+            raise ValueError("Faltan LINKEDIN_EMAIL/PASSWORD o LINKEDIN_LI_AT en .env")
+
+        try:
+            page.goto("https://www.linkedin.com/", wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
+            page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
+        except Exception as e:
+            self.log(f"Advertencia al navegar: {e}")
         page.wait_for_timeout(5000)
 
         current_url = (page.url or "").lower()
         needs_login = "linkedin.com/login" in current_url or "linkedin.com/uas" in current_url
 
         if not needs_login:
-            username_field = page.locator("#username")
-            needs_login = username_field.count() > 0 and username_field.is_visible()
+            username_field = page.locator('input[type="email"], input[autocomplete*="username"], #username, #session_key')
+            needs_login = username_field.count() > 0 and username_field.first.is_visible()
 
         if needs_login:
             self.log("No hay sesion activa -> login automatico...")
@@ -241,11 +255,28 @@ class ScraperEngine:
                 page.goto(LINKEDIN_LOGIN_URL, wait_until="domcontentloaded")
                 page.wait_for_timeout(3000)
 
-            if self._is_on_login(page) and page.locator("#username").count() > 0:
-                page.fill("#username", email)
-                page.fill("#password", password)
-                page.click("button[type='submit']")
-                page.wait_for_timeout(3000)
+            if self._is_on_login(page):
+                self.log("Rellenando credenciales de usuario...")
+                try:
+                    page.wait_for_selector('input[type="email"], input[autocomplete*="username"], #username, #session_key', timeout=15000)
+                    user_input = page.locator('input[type="email"], input[autocomplete*="username"], #username, #session_key').first
+                    pass_input = page.locator('input[type="password"], input[autocomplete*="current-password"], #password, #session_password').first
+                    
+                    if email and password:
+                        user_input.fill(email)
+                        pass_input.fill(password)
+                        
+                        submit_btn = page.locator('button[type="submit"]')
+                        if submit_btn.count() > 0:
+                            submit_btn.first.click()
+                        else:
+                            pass_input.press("Enter")
+                            
+                        page.wait_for_timeout(3000)
+                    else:
+                        self.log("ERROR: No hay EMAIL o PASSWORD en el .env")
+                except Exception as e:
+                    self.log(f"Fallo al rellenar login: {e}")
 
                 if self._is_on_challenge(page) or self._is_on_login(page):
                     self.log("!! Challenge/2FA detectado. Resuelvelo en el navegador.")
@@ -258,8 +289,11 @@ class ScraperEngine:
                         page.wait_for_timeout(30000)
                         retries += 1
 
-                page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
+                try:
+                    page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
+                    page.wait_for_timeout(3000)
+                except Exception as e:
+                    self.log(f"Advertencia al ir al feed tras login: {e}")
             else:
                 self.log("Sesion activa (redireccion al feed).")
 
@@ -368,9 +402,12 @@ class ScraperEngine:
 
         new_in_round = 0
 
-        # Posts iniciales
-        for pl in page.locator('div[role="listitem"]').all():
+        locators = page.locator('div[role="listitem"]').all()
+        processed_index = 0
+        
+        for pl in locators:
             data = self._extract_post_data(pl)
+            processed_index += 1
             if not data or not data['text']:
                 continue
             uid = f"{data['author']}_{data['text'][:50]}"
@@ -378,25 +415,67 @@ class ScraperEngine:
                 seen_ids.add(uid)
                 all_posts.append(data)
                 new_in_round += 1
+                
         if new_in_round > 0:
             save_json(all_posts, EXTRACTED_FILE)
 
         last_posts = page.evaluate('() => document.querySelectorAll(\'div[role="listitem"]\').length')
         stable = 0
+        phase_start = time.time()
+        MAX_PHASE_SECONDS = 480  # 8 minutos máximo por fase de scraping
 
         for cycle in range(1, self.max_scroll + 1):
             if self._check_stop() or page.is_closed():
                 break
             self._wait_pause()
 
+            # Watchdog: si llevamos más de 10 min en esta fase, cortar
+            elapsed = time.time() - phase_start
+            if elapsed > MAX_PHASE_SECONDS:
+                self.log(f"Watchdog: {int(elapsed)}s en scraping. Forzando fin de ciclo para evitar bloqueo.")
+                break
+
             self.update_stats(scroll_cycle=cycle, total_posts=len(all_posts), new_posts_round=new_in_round)
 
             try:
+                # Detección de crash de Chrome (Out of Memory, página muerta, etc.)
+                try:
+                    page_title = page.title() or ""
+                    page_content = page.evaluate('() => document.body ? document.body.innerText.substring(0, 300) : ""') or ""
+                except Exception:
+                    self.log("⚠️ Página no responde. Intentando recuperar...")
+                    try:
+                        page.reload(wait_until="domcontentloaded", timeout=15000)
+                        page.wait_for_timeout(3000)
+                    except Exception:
+                        self.log("❌ No se pudo recuperar la página. Finalizando scraping.")
+                        break
+                    continue
+
+                crash_indicators = ["¡vaya!", "out of memory", "err_", "no se puede", "aw, snap", "this page isn"]
+                combined_text = (page_title + " " + page_content).lower()
+                if any(ind in combined_text for ind in crash_indicators):
+                    self.log(f"⚠️ Chrome crasheó (detectado en scroll {cycle}). Recargando página...")
+                    try:
+                        page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded", timeout=20000)
+                        page.wait_for_timeout(5000)
+                        processed_index = 0
+                        self.log("✅ Página recuperada. Continuando scraping...")
+                    except Exception:
+                        self.log("❌ No se pudo recargar LinkedIn. Finalizando scraping.")
+                        break
+                    continue
+
                 self._scroll_feed_down(page)
                 page.wait_for_timeout(random.randint(2500, 4500))
 
                 batch_new = 0
-                for pl in page.locator('div[role="listitem"]').all():
+                locators = page.locator('div[role="listitem"]').all()
+                
+                # Optimización: Solo procesar los posts nuevos
+                start_idx = max(0, processed_index - 5)
+                
+                for pl in locators[start_idx:]:
                     data = self._extract_post_data(pl)
                     if not data or not data['text']:
                         continue
@@ -406,11 +485,17 @@ class ScraperEngine:
                         all_posts.append(data)
                         batch_new += 1
                         new_in_round += 1
+                
+                processed_index = len(locators)
 
                 if batch_new > 0:
                     save_json(all_posts, EXTRACTED_FILE)
                     self.log(f"  Scroll {cycle}: +{batch_new} nuevos (Total: {len(all_posts)})")
                     self.update_stats(total_posts=len(all_posts), new_posts_round=new_in_round)
+                    
+                if processed_index >= 120:
+                    self.log(f"Límite seguro de memoria ({processed_index} posts en DOM). Finalizando scraping del ciclo.")
+                    break
 
                 if self._reached_end(page):
                     self.log("Fin del feed detectado.")
@@ -441,7 +526,15 @@ class ScraperEngine:
                 break
             except Exception as e:
                 self.log(f"Error scroll {cycle}: {e}")
-                break
+                # Intentar recuperar en vez de morir
+                try:
+                    page.reload(wait_until="domcontentloaded", timeout=15000)
+                    page.wait_for_timeout(3000)
+                    self.log("Página recargada tras error. Continuando...")
+                    processed_index = 0
+                except Exception:
+                    self.log("No se pudo recuperar. Finalizando scraping.")
+                    break
 
         self.log(f"Scraping: +{new_in_round} nuevos. Total: {len(all_posts)}")
         self.update_stats(total_posts=len(all_posts), new_posts_round=new_in_round)
@@ -482,22 +575,53 @@ class ScraperEngine:
             key = f"{item.get('author', '')}|{item.get('text', '')[:50]}"
             vote_map[key] = item.get('is_offer')
 
+        # Cargar contactos para cruce
+        contacts = load_contacts()
+
         offers = 0
         structural = 0
         emails_total = 0
+        from_contacts = 0
+        spam_filtered = 0
 
         for post in posts:
-            key = f"{post.get('author', '')}|{post.get('text', '')[:50]}"
+            author = post.get('author', '')
+            key = f"{author}|{post.get('text', '')[:50]}"
             result = detect_job_offer(post['text'], keywords, vote_map.get(key))
+
+            # Cruce con contactos
+            contact_match = match_author(author)
+            if contact_match:
+                post['is_contact'] = True
+                post['contact_info'] = contact_match
+            else:
+                post['is_contact'] = False
+                post['contact_info'] = None
+
+            # Filtro de spam: penalizar autores que son asesores/vendedores
+            is_spam, spam_role = is_spam_author(author)
+            if is_spam:
+                result['is_offer'] = False
+                result['score'] = 0.01
+                result['spam_filtered'] = True
+                result['spam_reason'] = spam_role
+                spam_filtered += 1
+            else:
+                result['spam_filtered'] = False
+
             post['job_prediction'] = result
             if result['is_offer']:
                 offers += 1
+                if post.get('is_contact'):
+                    from_contacts += 1
             if result.get('is_structural', False):
                 structural += 1
             emails_total += len(result.get('emails', []))
 
         save_json(posts, LOCATIONS_FILE)
-        self.log(f"Ofertas generales: {offers} | Estructurales: {structural} | Correos: {emails_total}")
+        contact_msg = f" | De contactos: {from_contacts}" if from_contacts > 0 else ""
+        spam_msg = f" | Spam filtrado: {spam_filtered}" if spam_filtered > 0 else ""
+        self.log(f"Ofertas: {offers} | Estructurales: {structural} | Correos: {emails_total}{contact_msg}{spam_msg}")
         self.update_stats(offers_general=offers, offers_structural=structural, emails_found=emails_total)
 
     def _phase_export(self):
@@ -514,13 +638,24 @@ class ScraperEngine:
             pred = post.get('job_prediction', {})
             if not pred.get('is_offer', False):
                 continue
+            if pred.get('spam_filtered', False):
+                continue
             emails_str = ", ".join(pred.get('emails', []))
             locs = post.get('locations', {})
             regions = ", ".join(locs.get('regions', []))
             communes = ", ".join([c['commune'] for c in locs.get('communes', [])])
 
+            # Info de contacto
+            contact_info = post.get('contact_info') or {}
+            es_contacto = 'Sí' if post.get('is_contact') else 'No'
+            contacto_empresa = contact_info.get('company', '') if contact_info else ''
+            contacto_cargo = contact_info.get('position', '') if contact_info else ''
+
             row = {
                 'Autor': post.get('author', ''),
+                'Es Contacto': es_contacto,
+                'Empresa Contacto': contacto_empresa,
+                'Cargo Contacto': contacto_cargo,
                 'URL Perfil': post.get('profile_url', ''),
                 'Correos': emails_str,
                 'Region': regions,
@@ -536,118 +671,217 @@ class ScraperEngine:
             if pred.get('is_structural', False):
                 structural_offers.append(row)
 
-        fieldnames = ['Autor', 'URL Perfil', 'Correos', 'Region', 'Comuna', 'Fecha', 'Score', 'IA Validado', 'Rol', 'Empresa', 'Texto']
+        fieldnames = ['Autor', 'Es Contacto', 'Empresa Contacto', 'Cargo Contacto', 'URL Perfil', 'Correos', 'Region', 'Comuna', 'Fecha', 'Score', 'IA Validado', 'Rol', 'Empresa', 'Texto']
         if all_offers:
-            with open(ALL_OFFERS_CSV, 'w', encoding='utf-8', newline='') as f:
-                csv.DictWriter(f, fieldnames=fieldnames).writeheader()
-                csv.DictWriter(f, fieldnames=fieldnames).writerows(all_offers)
-            self.log(f"Exportado: {len(all_offers)} ofertas -> {ALL_OFFERS_CSV}")
+            try:
+                with open(ALL_OFFERS_CSV, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(all_offers)
+                self.log(f"Exportado: {len(all_offers)} ofertas -> {ALL_OFFERS_CSV}")
+            except (PermissionError, OSError) as e:
+                self.log(f"ERROR: No se pudo escribir {ALL_OFFERS_CSV} (¿esta abierto en Excel?): {e}")
         if structural_offers:
-            with open(STRUCTURAL_CSV, 'w', encoding='utf-8', newline='') as f:
-                csv.DictWriter(f, fieldnames=fieldnames).writeheader()
-                csv.DictWriter(f, fieldnames=fieldnames).writerows(structural_offers)
-            self.log(f"Exportado: {len(structural_offers)} estructurales -> {STRUCTURAL_CSV}")
+            try:
+                with open(STRUCTURAL_CSV, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(structural_offers)
+                self.log(f"Exportado: {len(structural_offers)} estructurales -> {STRUCTURAL_CSV}")
+            except (PermissionError, OSError) as e:
+                self.log(f"ERROR: No se pudo escribir {STRUCTURAL_CSV} (¿esta abierto en Excel?): {e}")
+
+    def _phase_networking(self, page):
+        if self._check_stop():
+            return
+        self.log("=== FASE 5: NETWORKING (AUTOCONNECT) ===")
+        self.update_stats(phase="Networking")
+        
+        net_stats = load_json(NETWORK_STATS_FILE, {"followers": 0, "weekly_invites": 0, "week_start": str(datetime.now().date())})
+        
+        try:
+            week_start = datetime.strptime(net_stats.get("week_start", str(datetime.now().date())), "%Y-%m-%d").date()
+        except Exception:
+            week_start = datetime.now().date()
+            
+        if (datetime.now().date() - week_start).days >= 7:
+            self.log("Semana completada, reiniciando contador de invitaciones.")
+            net_stats["weekly_invites"] = 0
+            net_stats["week_start"] = str(datetime.now().date())
+            
+        max_weekly = 100
+        if net_stats["weekly_invites"] >= max_weekly:
+            self.log(f"Límite semanal alcanzado ({net_stats['weekly_invites']}/{max_weekly}). Omitiendo invitaciones.")
+            page.goto(LINKEDIN_NETWORK_URL, wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+        else:
+            self.log("Navegando a Mi red...")
+            page.goto(LINKEDIN_NETWORK_URL, wait_until="domcontentloaded")
+            page.wait_for_timeout(4000)
+            
+            try:
+                # Botones de conectar
+                buttons = page.locator("button:has-text('Conectar'), button:has-text('Connect')").all()
+                to_invite = min(random.randint(2, 5), max_weekly - net_stats["weekly_invites"], len(buttons))
+                
+                if to_invite > 0:
+                    self.log(f"Encontrados {len(buttons)} botones de conexión. Enviando {to_invite} invitaciones...")
+                    invited = 0
+                    for btn in buttons[:to_invite]:
+                        if self._check_stop():
+                            break
+                        try:
+                            btn.scroll_into_view_if_needed()
+                            page.wait_for_timeout(500)
+                            btn.click()
+                            page.wait_for_timeout(random.randint(1500, 3000))
+                            invited += 1
+                        except Exception as e:
+                            self.log(f"No se pudo hacer click en Conectar: {e}")
+                    
+                    net_stats["weekly_invites"] += invited
+                    self.log(f"+{invited} invitaciones enviadas. Total semana: {net_stats['weekly_invites']}/{max_weekly}")
+            except Exception as e:
+                self.log(f"Error buscando botones de Conectar: {e}")
+
+        try:
+            followers_text = page.locator("text=seguidor").first.text_content(timeout=2000)
+            if followers_text:
+                nums = re.findall(r'[\d\.]+', followers_text)
+                if nums:
+                    net_stats["followers"] = nums[0].replace('.', '')
+        except Exception:
+            pass
+            
+        save_json(net_stats, NETWORK_STATS_FILE)
+        self.update_stats(
+            followers=net_stats.get("followers", 0), 
+            weekly_invites=f"{net_stats.get('weekly_invites', 0)}/{max_weekly}"
+        )
 
     # --- PIPELINE PRINCIPAL ---
     def _run_pipeline(self):
         load_env(ENV_FILE)
-        self.update_stats(status="Iniciando navegador...")
-        self.log("Iniciando navegador...")
+        
+        while not self._check_stop():
+            self.update_stats(status="Iniciando navegador...")
+            self.log("Iniciando navegador...")
+            try:
+                with sync_playwright() as p:
+                    try:
+                        browser = p.chromium.launch(
+                            headless=False, slow_mo=30, channel="chrome",
+                            args=["--start-maximized", "--disable-blink-features=AutomationControlled"]
+                        )
+                    except Exception:
+                        try:
+                            browser = p.chromium.launch(
+                                headless=False, slow_mo=30, channel="msedge",
+                                args=["--start-maximized", "--disable-blink-features=AutomationControlled"]
+                            )
+                        except Exception:
+                            browser = p.chromium.launch(
+                                headless=False, slow_mo=30,
+                                args=["--start-maximized", "--disable-blink-features=AutomationControlled"]
+                            )
+                    
+                    ctx_opts = {
+                        "no_viewport": True,
+                        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                    }
+                    if Path(STATE_FILE).exists():
+                        context = browser.new_context(storage_state=STATE_FILE, **ctx_opts)
+                    else:
+                        context = browser.new_context(**ctx_opts)
 
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=False, slow_mo=30,
-                    args=["--start-maximized", "--disable-blink-features=AutomationControlled"]
-                )
-                ctx_opts = {
-                    "no_viewport": True,
-                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                }
-                if Path(STATE_FILE).exists():
-                    context = browser.new_context(storage_state=STATE_FILE, **ctx_opts)
-                else:
-                    context = browser.new_context(**ctx_opts)
+                    page = context.new_page()
+                    page.set_default_timeout(15000)  # 15s max para cualquier operación de Playwright
+                    page.set_default_navigation_timeout(30000)  # 30s max para navegación
 
-                page = context.new_page()
-
-                try:
-                    self._ensure_login(page, context)
-                    if self._check_stop():
-                        return
-
-                    while not self._check_stop():
-                        self._wait_pause()
+                    try:
+                        self._ensure_login(page, context)
                         if self._check_stop():
                             break
 
-                        self.stats["cycle"] += 1
-                        cycle = self.stats["cycle"]
-                        self.update_stats(status="Ejecutando", phase="Inicio ciclo")
-                        self.log(f"--- CICLO #{cycle} - {datetime.now().strftime('%H:%M:%S')} ---")
+                        while not self._check_stop():
+                            self._wait_pause()
+                            if self._check_stop():
+                                break
 
-                        if cycle > 1:
-                            self.log("Refrescando feed...")
-                            self.update_stats(phase="Refrescando")
-                            page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
-                            page.wait_for_timeout(3000)
+                            self.stats["cycle"] += 1
+                            cycle = self.stats["cycle"]
+                            self.update_stats(status="Ejecutando", phase="Inicio ciclo")
+                            self.log(f"--- CICLO #{cycle} - {datetime.now().strftime('%H:%M:%S')} ---")
 
-                        self._phase_scraping(page)
-                        if self._check_stop():
-                            break
+                            if cycle > 1:
+                                self.log("Refrescando feed...")
+                                self.update_stats(phase="Refrescando")
+                                page.goto(LINKEDIN_FEED_URL, wait_until="domcontentloaded")
+                                page.wait_for_timeout(3000)
 
+                            self._phase_scraping(page)
+                            if self._check_stop():
+                                break
+
+                            try:
+                                context.storage_state(path=STATE_FILE)
+                            except Exception:
+                                pass
+
+                            self._phase_locations()
+                            self._phase_detection()
+                            self._phase_export()
+                            self._phase_networking(page)
+
+                            if self._check_stop():
+                                break
+
+                            self.log(f"Ciclo #{cycle} completado. Esperando {self.wait_minutes} min...")
+                            self.update_stats(status="Esperando", phase="Espera entre ciclos")
+
+                            wait_secs = self.wait_minutes * 60
+                            for remaining in range(wait_secs, 0, -1):
+                                if self._check_stop():
+                                    break
+                                self._wait_pause()
+                                if remaining % 30 == 0:
+                                    mins = remaining // 60
+                                    secs = remaining % 60
+                                    self.update_stats(next_cycle_in=f"{mins}m {secs}s")
+                                time.sleep(1)
+
+                            self.update_stats(next_cycle_in="")
+
+                    except Exception as e:
+                        self.log(f"Error en navegador: {type(e).__name__}: {e}")
+                        if not self._check_stop():
+                            self.log("Reiniciando en 10 segundos debido al error...")
+                            time.sleep(10)
+                    finally:
                         try:
                             context.storage_state(path=STATE_FILE)
                         except Exception:
                             pass
+                        try:
+                            if not page.is_closed():
+                                context.close()
+                        except Exception:
+                            pass
+                        try:
+                            browser.close()
+                        except Exception:
+                            pass
 
-                        self._phase_locations()
-                        self._phase_detection()
-                        self._phase_export()
-
-                        if self._check_stop():
-                            break
-
-                        self.log(f"Ciclo #{cycle} completado. Esperando {self.wait_minutes} min...")
-                        self.update_stats(status="Esperando", phase="Espera entre ciclos")
-
-                        wait_secs = self.wait_minutes * 60
-                        for remaining in range(wait_secs, 0, -1):
-                            if self._check_stop():
-                                break
-                            self._wait_pause()
-                            if remaining % 30 == 0:
-                                mins = remaining // 60
-                                secs = remaining % 60
-                                self.update_stats(next_cycle_in=f"{mins}m {secs}s")
-                            time.sleep(1)
-
-                        self.update_stats(next_cycle_in="")
-
-                except Exception as e:
-                    self.log(f"Error: {type(e).__name__}: {e}")
-                finally:
-                    try:
-                        context.storage_state(path=STATE_FILE)
-                    except Exception:
-                        pass
-                    try:
-                        if not page.is_closed():
-                            context.close()
-                    except Exception:
-                        pass
-                    try:
-                        browser.close()
-                    except Exception:
-                        pass
-
-        except Exception as e:
-            self.log(f"Error fatal: {e}")
-        finally:
-            self._running = False
-            self._paused = False
-            self.update_stats(status="Detenido", phase="")
-            self.log("Pipeline detenido.")
+            except Exception as e:
+                self.log(f"Error fatal: {e}")
+                if not self._check_stop():
+                    time.sleep(10)
+                    
+        # Fin de la ejecucion
+        self._running = False
+        self._paused = False
+        self.update_stats(status="Detenido", phase="")
+        self.log("Pipeline detenido.")
 
 
 # ===================== INTERFAZ TKINTER =====================
@@ -680,6 +914,8 @@ class DashboardApp:
         self.var_structural = StringVar(value="0")
         self.var_emails = StringVar(value="0")
         self.var_locations = StringVar(value="0")
+        self.var_followers = StringVar(value="0")
+        self.var_weekly_invites = StringVar(value="0/100")
         self.var_scroll = StringVar(value="0")
         self.var_next = StringVar(value="-")
         self.var_phase = StringVar(value="-")
@@ -767,6 +1003,8 @@ class DashboardApp:
             ("Estructurales", self.var_structural, COLORS["accent"], "Ofertas_Estructurales.csv"),
             ("Correos", self.var_emails, COLORS["success"], "Todas_Ofertas.csv"),
             ("Geolocalizados", self.var_locations, COLORS["accent_blue"], None),
+            ("Seguidores", self.var_followers, COLORS["text_bright"], None),
+            ("Invitaciones", self.var_weekly_invites, COLORS["accent_green"], None),
         ]
 
         for i, (title, var, color, csv_file) in enumerate(stats_data):
@@ -937,6 +1175,9 @@ class DashboardApp:
         self.root.destroy()
 
     def _show_data_viewer(self, title, csv_file):
+        if not Path(csv_file).exists():
+            messagebox.showinfo("Aviso", f"El archivo aún no ha sido generado.\nPor favor, espera a que el bot termine la fase de Scraping actual (ciclo en progreso) para que analice y genere este reporte.")
+            return
         DataViewer(self.root, title, csv_file)
 
     def _open_training_window(self):
@@ -956,6 +1197,10 @@ class DashboardApp:
         self.var_structural.set(str(stats.get("offers_structural", 0)))
         self.var_emails.set(str(stats.get("emails_found", 0)))
         self.var_locations.set(str(stats.get("locations_found", 0)))
+        if "followers" in stats:
+            self.var_followers.set(str(stats.get("followers", 0)))
+        if "weekly_invites" in stats:
+            self.var_weekly_invites.set(str(stats.get("weekly_invites", "0/100")))
         self.var_next.set(stats.get("next_cycle_in", "-") or "-")
         self.var_phase.set(stats.get("phase", "") or "")
 
@@ -1027,6 +1272,10 @@ class DashboardApp:
         self.var_structural.set(str(structural))
         self.var_emails.set(str(emails_total))
         self.var_locations.set(str(locations))
+        
+        net_stats = load_json(NETWORK_STATS_FILE, {"followers": 0, "weekly_invites": 0})
+        self.var_followers.set(str(net_stats.get("followers", 0)))
+        self.var_weekly_invites.set(f"{net_stats.get('weekly_invites', 0)}/100")
         
         self._append_log(f"[SISTEMA] Panel de control listo. {len(posts)} posts en base de datos.\n", "info")
 
