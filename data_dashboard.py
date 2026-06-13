@@ -33,6 +33,7 @@ STRUCTURAL_FILE = "Ofertas_Estructurales.csv"
 TRAINING_FILE = "training_data.json"
 KEYWORDS_FILE = "job_keywords.json"
 LEADS_FILE = "Contactos_Emails.csv"
+SEGUIMIENTO_FILE = "seguimiento.json"
 LEADS_COLUMNS = [
     "Correo", "Autor", "Empresa", "Cargo", "Es Estructural", "Es Contacto",
     "Region", "Comuna", "Fecha Post", "URL Perfil", "Contactado", "Fecha Agregado"
@@ -110,6 +111,53 @@ def save_training_data(data):
     with open(TRAINING_FILE, 'w', encoding='utf-8') as f:
         f.write(content)
     push_file_to_github(TRAINING_FILE, content.encode("utf-8"), "Actualizar training_data.json desde la app")
+
+def load_seguimiento():
+    if os.path.exists(SEGUIMIENTO_FILE):
+        try:
+            with open(SEGUIMIENTO_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return []
+    return []
+
+def save_seguimiento(data):
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+    with open(SEGUIMIENTO_FILE, 'w', encoding='utf-8') as f:
+        f.write(content)
+    push_file_to_github(SEGUIMIENTO_FILE, content.encode("utf-8"), "Actualizar seguimiento.json desde la app")
+
+def add_to_seguimiento(row):
+    """Marca un post para seguimiento manual. Evita duplicados por texto."""
+    text = row.get("text") if isinstance(row, dict) else row.get("Texto", "")
+    if any(item.get("text") == text for item in st.session_state.seguimiento_data):
+        return
+    item = {
+        "text": text,
+        "autor": _disp(row.get("Autor")),
+        "empresa": _disp(row.get("Empresa")) or _disp(row.get("Empresa Contacto")),
+        "correos": _disp(row.get("Correos")),
+        "url_perfil": row.get("URL Perfil", ""),
+        "region": _disp(row.get("Region")),
+        "score": row.get("Score", 0),
+        "notas": "",
+        "added_at": str(datetime.now()),
+    }
+    st.session_state.seguimiento_data.append(item)
+    save_seguimiento(st.session_state.seguimiento_data)
+
+def remove_from_seguimiento(text):
+    st.session_state.seguimiento_data = [
+        item for item in st.session_state.seguimiento_data if item.get("text") != text
+    ]
+    save_seguimiento(st.session_state.seguimiento_data)
+
+def update_seguimiento_notes(text, notas):
+    for item in st.session_state.seguimiento_data:
+        if item.get("text") == text:
+            item["notas"] = notas
+            break
+    save_seguimiento(st.session_state.seguimiento_data)
 
 def classify_post(text, is_job_offer, is_structural, is_seeker=False, discarded=False):
     """Registra la clasificación manual de un post y la guarda (local + GitHub si está configurado)."""
@@ -213,6 +261,50 @@ def compute_priority(row):
         priority += 0.15
     return priority
 
+def render_post_card(row, now=None, expanded=True):
+    """Renderiza la tarjeta de un post (badges, datos de contacto, % de detección y
+    descripción completa). Funciona tanto con filas de df_rank (pd.Series) como con
+    items de seguimiento_data (dict), ya que ambos exponen .get()."""
+    now = now or datetime.now()
+    badges = []
+    if row.get('Es Estructural') == 'Sí':
+        badges.append("🏗️ Estructural")
+    if row.get('Es Contacto') == 'Sí':
+        badges.append(f"🤝 Contacto directo ({row.get('Empresa Contacto', '')} - {row.get('Cargo Contacto', '')})")
+    correos = row.get('Correos') if row.get('Correos') is not None else row.get('correos')
+    if isinstance(correos, str) and correos.strip():
+        badges.append("📧 Tiene correo")
+    fecha_dt = row.get('_FechaDT')
+    if fecha_dt is not None and pd.notna(fecha_dt) and (now - fecha_dt).days <= 7:
+        badges.append("🕐 Reciente")
+
+    badges_html = " &nbsp; ".join(badges) if badges else "—"
+    texto_completo = _disp(row.get('Texto') if row.get('Texto') is not None else row.get('text'))
+    empresa = _disp(row.get('Empresa')) or _disp(row.get('Empresa Contacto')) or _disp(row.get('empresa'))
+    region = _disp(row.get('Region')) or _disp(row.get('region'))
+    url_perfil = row.get('URL Perfil') or row.get('url_perfil') or '#'
+
+    try:
+        score = row.get('Score') if row.get('Score') is not None else row.get('score', 0)
+        deteccion_pct = float(score or 0) * 100
+    except (ValueError, TypeError):
+        deteccion_pct = 0.0
+
+    st.markdown(f'''
+    <div class="post-card">
+        <h4>👤 {_disp(row.get("Autor")) or _disp(row.get("autor"))} <span style="float:right; color:#00e676;">Prioridad: {row.get("Prioridad", 0):.2f}</span></h4>
+        <p>{badges_html}</p>
+        <p><b>🛠️ Rol:</b> {_disp(row.get("Rol"))} | <b>🏢 Empresa:</b> {empresa} | <b>📍 Región:</b> {region}</p>
+        <p><b>📧 Correos:</b> <span style="color:#00e676">{_disp(correos, "Ninguno")}</span></p>
+        <a href="{url_perfil}" target="_blank">🔗 Ver Perfil en LinkedIn</a>
+    </div>
+    ''', unsafe_allow_html=True)
+
+    st.progress(min(max(deteccion_pct / 100, 0.0), 1.0), text=f"🤖 % de detección del bot: {deteccion_pct:.0f}%")
+
+    with st.expander("📄 Descripción completa", expanded=expanded):
+        st.write(texto_completo)
+
 def load_leads():
     if os.path.exists(LEADS_FILE):
         try:
@@ -282,16 +374,24 @@ if df.empty:
 # Inicializar variables de sesión para el entrenamiento
 if 'training_data' not in st.session_state:
     st.session_state.training_data = load_training_data()
-    
+
+if 'seguimiento_data' not in st.session_state:
+    st.session_state.seguimiento_data = load_seguimiento()
+
+if 'ofertas_skipped' not in st.session_state:
+    st.session_state.ofertas_skipped = set()
+
 # Layout de Pestañas
-tab1, tab_ofertas, tab_train, tab2 = st.tabs(["📈 Dashboard", "📋 Ofertas", "🤖 Entrenamiento", "🔎 Datos"])
+tab1, tab_ofertas, tab_seguimiento, tab_train, tab2 = st.tabs(
+    ["📈 Dashboard", "📋 Ofertas", "📌 Mi Seguimiento", "🤖 Entrenamiento", "🔎 Datos"]
+)
 
 # ==========================================
 # PESTAÑA 1: DASHBOARD
 # ==========================================
 with tab1:
     st.markdown("### Resumen de Extracción")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Total Ofertas", f"{len(df):,}")
     with col2:
@@ -301,6 +401,8 @@ with tab1:
         st.metric("Posts con Correos", f"{total_correos:,}")
     with col4:
         st.metric("Muestras Entrenadas", f"{len(st.session_state.training_data):,}")
+    with col5:
+        st.metric("📌 En Seguimiento", f"{len(st.session_state.seguimiento_data):,}")
 
     st.markdown("---")
     col_chart1, col_chart2 = st.columns(2)
@@ -327,104 +429,105 @@ with tab1:
 # ==========================================
 with tab_ofertas:
     st.markdown("### 📋 Ofertas")
-    st.write("Ranking combinado: score de IA + oferta estructural + contacto directo + correo disponible. Clasifica cada post para entrenar al bot.")
+    st.write("Revisa un post a la vez: punteá su clasificación, descartalo o marcalo para seguimiento y aparecerá el siguiente automáticamente.")
 
     trained_map = {item.get("text", ""): item for item in st.session_state.training_data}
-    total_pendientes = len(df[~df["Texto"].isin(trained_map.keys())])
+    seguimiento_map = {item.get("text", ""): item for item in st.session_state.seguimiento_data}
+    reviewed_keys = trained_map.keys() | seguimiento_map.keys()
 
     df_rank = df.copy()
     df_rank['Prioridad'] = df_rank.apply(compute_priority, axis=1)
     df_rank['_FechaDT'] = pd.to_datetime(df_rank['Fecha'], errors='coerce')
-    df_rank = df_rank.sort_values(by=['Prioridad', '_FechaDT'], ascending=[False, False])
 
-    col_f1, col_f2, col_f3 = st.columns([1, 1, 1.4])
-    with col_f1:
-        solo_accionables = st.checkbox("Solo accionables (correo o contacto)", key="f_of_accionable")
-    with col_f2:
-        solo_pendientes = st.checkbox("Solo pendientes de clasificar", key="f_of_pendientes")
-    with col_f3:
-        top_n = st.slider("Cuántas mostrar:", min_value=5, max_value=50, value=10, step=5, key="f_of_topn")
-
+    solo_accionables = st.checkbox("Solo accionables (correo o contacto)", key="f_of_accionable")
     if solo_accionables:
         df_rank = df_rank[
             (df_rank["Correos"].notna() & (df_rank["Correos"] != "")) |
             (df_rank["Es Contacto"] == "Sí")
         ]
-    if solo_pendientes:
-        df_rank = df_rank[~df_rank["Texto"].isin(trained_map.keys())]
 
-    st.caption(f"🧠 {len(st.session_state.training_data)} posts clasificados | ⏳ {total_pendientes} pendientes de revisar.")
+    pending_df = df_rank[~df_rank["Texto"].isin(reviewed_keys)].copy()
+    pending_df['_skipped'] = pending_df['Texto'].isin(st.session_state.ofertas_skipped)
+    pending_df = pending_df.sort_values(by=['_skipped', 'Prioridad', '_FechaDT'], ascending=[True, False, False])
 
-    df_rank = df_rank.head(top_n)
+    st.caption(
+        f"🧠 {len(st.session_state.training_data)} clasificados | "
+        f"⭐ {len(st.session_state.seguimiento_data)} en seguimiento | "
+        f"⏳ {len(pending_df)} pendientes de revisar."
+    )
 
-    if df_rank.empty:
-        st.info("No hay ofertas que cumplan los filtros seleccionados.")
+    if pending_df.empty:
+        st.success("🎉 No quedan ofertas pendientes de revisar.")
     else:
-        now = datetime.now()
-        for idx, row in df_rank.iterrows():
-            badges = []
-            if row.get('Es Estructural') == 'Sí':
-                badges.append("🏗️ Estructural")
-            if row.get('Es Contacto') == 'Sí':
-                badges.append(f"🤝 Contacto directo ({row.get('Empresa Contacto', '')} - {row.get('Cargo Contacto', '')})")
-            correos = row.get('Correos')
-            if isinstance(correos, str) and correos.strip():
-                badges.append("📧 Tiene correo")
-            fecha_dt = row.get('_FechaDT')
-            if pd.notna(fecha_dt) and (now - fecha_dt).days <= 7:
-                badges.append("🕐 Reciente")
+        row = pending_df.iloc[0]
+        texto = row.get("Texto", "")
 
-            badges_html = " &nbsp; ".join(badges) if badges else "—"
-            texto_completo = _disp(row.get('Texto'))
-            empresa = _disp(row.get('Empresa')) or _disp(row.get('Empresa Contacto'))
+        render_post_card(row)
 
-            try:
-                deteccion_pct = float(row.get('Score', 0) or 0) * 100
-            except (ValueError, TypeError):
-                deteccion_pct = 0.0
+        def _classify_and_advance(*args, **kwargs):
+            classify_post(texto, *args, **kwargs)
+            st.session_state.ofertas_skipped.discard(texto)
+            st.rerun()
 
-            st.markdown(f'''
-            <div class="post-card">
-                <h4>👤 {_disp(row.get("Autor"))} <span style="float:right; color:#00e676;">Prioridad: {row.get("Prioridad", 0):.2f}</span></h4>
-                <p>{badges_html}</p>
-                <p><b>🛠️ Rol:</b> {_disp(row.get("Rol"))} | <b>🏢 Empresa:</b> {empresa} | <b>📍 Región:</b> {_disp(row.get("Region"))}</p>
-                <p><b>📧 Correos:</b> <span style="color:#00e676">{_disp(row.get("Correos"), "Ninguno")}</span></p>
-                <a href="{row.get("URL Perfil", "#")}" target="_blank">🔗 Ver Perfil en LinkedIn</a>
-            </div>
-            ''', unsafe_allow_html=True)
+        r1c1, r1c2, r1c3 = st.columns(3)
+        with r1c1:
+            if st.button("🏗️ Estructural", key="of_struct", use_container_width=True, type="primary"):
+                _classify_and_advance(True, True)
+        with r1c2:
+            if st.button("✅ Oferta General", key="of_general", use_container_width=True):
+                _classify_and_advance(True, False)
+        with r1c3:
+            if st.button("🙋 Postulante (busca pega)", key="of_seeker", use_container_width=True):
+                _classify_and_advance(False, False, is_seeker=True)
 
-            st.progress(min(max(deteccion_pct / 100, 0.0), 1.0), text=f"🤖 % de detección del bot: {deteccion_pct:.0f}%")
+        r2c1, r2c2, r2c3 = st.columns(3)
+        with r2c1:
+            if st.button("🗑️ Basura / No es oferta", key="of_trash", use_container_width=True):
+                _classify_and_advance(False, False)
+        with r2c2:
+            if st.button("🚫 Descartar", key="of_discard", use_container_width=True):
+                _classify_and_advance(False, False, discarded=True)
+        with r2c3:
+            if st.button("⭐ Seguimiento", key="of_seguimiento", use_container_width=True):
+                add_to_seguimiento(row)
+                st.session_state.ofertas_skipped.discard(texto)
+                st.rerun()
 
-            with st.expander("📄 Descripción completa", expanded=True):
-                st.write(texto_completo)
+        if st.button("⏭️ Ver más tarde", key="of_skip"):
+            st.session_state.ofertas_skipped.add(texto)
+            st.rerun()
 
-            existing = trained_map.get(row.get("Texto", ""))
-            if existing:
-                st.caption(f"✅ Ya clasificado como: **{classification_label(existing)}**")
-            else:
-                c1, c2, c3, c4, c5 = st.columns(5)
-                with c1:
-                    if st.button("🏗️ Estructural", key=f"of_struct_{idx}", use_container_width=True, type="primary"):
-                        classify_post(row.get("Texto", ""), True, True)
+
+# ==========================================
+# PESTAÑA MI SEGUIMIENTO
+# ==========================================
+with tab_seguimiento:
+    st.markdown("### 📌 Mi Seguimiento")
+    st.write("Ofertas que marcaste para retomar más tarde. Agrega notas y quítalas de la lista cuando ya no te interesen.")
+
+    if github_sync_enabled():
+        st.caption("✅ Esta lista se guarda automáticamente en GitHub, así que tú y tu colega la comparten sin pasos manuales.")
+    else:
+        st.caption("⚠️ La sincronización con GitHub no está configurada: esta lista solo vive en esta sesión y se perderá al reiniciar la app.")
+
+    if not st.session_state.seguimiento_data:
+        st.info("Todavía no marcaste ninguna oferta para seguimiento. Usa el botón ⭐ Seguimiento en la pestaña Ofertas.")
+    else:
+        items = sorted(st.session_state.seguimiento_data, key=lambda i: i.get("added_at", ""), reverse=True)
+        for item in items:
+            with st.expander(f"👤 {item.get('autor', '')} — {item.get('empresa', '')}"):
+                render_post_card(item, expanded=False)
+                notas = st.text_area("Notas", value=item.get("notas", ""), key=f"seg_notas_{item.get('text','')}")
+                col_seg1, col_seg2 = st.columns(2)
+                with col_seg1:
+                    if st.button("💾 Guardar nota", key=f"seg_save_{item.get('text','')}"):
+                        update_seguimiento_notes(item.get("text", ""), notas)
+                        st.success("Nota guardada.")
                         st.rerun()
-                with c2:
-                    if st.button("✅ Oferta General", key=f"of_general_{idx}", use_container_width=True):
-                        classify_post(row.get("Texto", ""), True, False)
+                with col_seg2:
+                    if st.button("🗑️ Quitar de seguimiento", key=f"seg_remove_{item.get('text','')}"):
+                        remove_from_seguimiento(item.get("text", ""))
                         st.rerun()
-                with c3:
-                    if st.button("🙋 Postulante (busca pega)", key=f"of_seeker_{idx}", use_container_width=True):
-                        classify_post(row.get("Texto", ""), False, False, is_seeker=True)
-                        st.rerun()
-                with c4:
-                    if st.button("🗑️ Basura / No es oferta", key=f"of_trash_{idx}", use_container_width=True):
-                        classify_post(row.get("Texto", ""), False, False)
-                        st.rerun()
-                with c5:
-                    if st.button("🚫 Descartar", key=f"of_discard_{idx}", use_container_width=True):
-                        classify_post(row.get("Texto", ""), False, False, discarded=True)
-                        st.rerun()
-
-            st.markdown("---")
 
 
 # ==========================================
