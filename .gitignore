@@ -9,3 +9,5 @@ __pycache__/
 !Contactos_Emails.csv
 !Ofertas_Estructurales.csv
 !Todas_Ofertas.csv
+!localidades.json
+!job_keywords.json

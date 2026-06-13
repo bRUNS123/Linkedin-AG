@@ -5,7 +5,9 @@ import os
 import json
 import base64
 import requests
+from collections import Counter
 from datetime import datetime
+from train_model import normalize_text, get_ngrams, STOPWORDS
 
 # Configuracion de pagina
 st.set_page_config(
@@ -29,6 +31,7 @@ st.markdown("""
 ALL_OFFERS_FILE = "Todas_Ofertas.csv"
 STRUCTURAL_FILE = "Ofertas_Estructurales.csv"
 TRAINING_FILE = "training_data.json"
+KEYWORDS_FILE = "job_keywords.json"
 LEADS_FILE = "Contactos_Emails.csv"
 LEADS_COLUMNS = [
     "Correo", "Autor", "Empresa", "Cargo", "Es Estructural", "Es Contacto",
@@ -108,19 +111,22 @@ def save_training_data(data):
         f.write(content)
     push_file_to_github(TRAINING_FILE, content.encode("utf-8"), "Actualizar training_data.json desde la app")
 
-def classify_post(text, is_job_offer, is_structural, is_seeker=False):
+def classify_post(text, is_job_offer, is_structural, is_seeker=False, discarded=False):
     """Registra la clasificación manual de un post y la guarda (local + GitHub si está configurado)."""
     new_item = {
         "text": text,
         "is_job_offer": is_job_offer,
         "is_structural": is_structural,
         "is_seeker": is_seeker,
+        "discarded": discarded,
         "labeled_at": str(datetime.now())
     }
     st.session_state.training_data.append(new_item)
     save_training_data(st.session_state.training_data)
 
 def classification_label(item):
+    if item.get("discarded"):
+        return "🚫 Descartado (no relevante)"
     if item.get("is_structural"):
         return "🏗️ Oferta Estructural"
     if item.get("is_seeker"):
@@ -128,6 +134,60 @@ def classification_label(item):
     if item.get("is_job_offer"):
         return "✅ Oferta General"
     return "🗑️ Basura / No es oferta"
+
+def load_keywords():
+    if os.path.exists(KEYWORDS_FILE):
+        try:
+            with open(KEYWORDS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"positive": [], "negative": []}
+
+def save_keywords(keywords):
+    content = json.dumps(keywords, ensure_ascii=False, indent=2)
+    with open(KEYWORDS_FILE, 'w', encoding='utf-8') as f:
+        f.write(content)
+    push_file_to_github(KEYWORDS_FILE, content.encode("utf-8"), "Actualizar job_keywords.json desde la app")
+
+def suggest_keywords(training_data, current_keywords, min_samples=5):
+    """Analiza las clasificaciones manuales y sugiere nuevas palabras clave
+    (positivas/negativas) que el detector todavía no usa, basándose en n-gramas
+    frecuentes en posts marcados como oferta vs. basura/descartados."""
+    usable = [item for item in training_data if not item.get("discarded")]
+    if len(usable) < min_samples:
+        return {"positive": [], "negative": []}
+
+    pos_counts, neg_counts = Counter(), Counter()
+
+    def process(item, counter):
+        words = [w for w in normalize_text(item.get("text", "")).split()
+                 if w not in STOPWORDS and len(w) > 2]
+        counter.update(words)
+        counter.update(get_ngrams(words, 2))
+
+    for item in usable:
+        if item.get("is_job_offer"):
+            process(item, pos_counts)
+        else:
+            process(item, neg_counts)
+
+    current_pos = set(current_keywords.get("positive", []))
+    current_neg = set(current_keywords.get("negative", []))
+
+    def candidates(counts, other_counts, known):
+        result = []
+        for term, count in counts.items():
+            if count < 2 or term in known:
+                continue
+            if count > other_counts.get(term, 0) * 3:
+                result.append(term)
+        return sorted(result, key=lambda t: counts[t], reverse=True)[:5]
+
+    return {
+        "positive": candidates(pos_counts, neg_counts, current_pos | current_neg),
+        "negative": candidates(neg_counts, pos_counts, current_pos | current_neg),
+    }
 
 def _disp(val, default=""):
     """Convierte NaN/None/vacío a un valor por defecto para mostrar en la UI."""
@@ -224,7 +284,7 @@ if 'training_data' not in st.session_state:
     st.session_state.training_data = load_training_data()
     
 # Layout de Pestañas
-tab1, tab_ofertas, tab2 = st.tabs(["📈 Dashboard", "📋 Ofertas", "🔎 Datos"])
+tab1, tab_ofertas, tab_train, tab2 = st.tabs(["📈 Dashboard", "📋 Ofertas", "🤖 Entrenamiento", "🔎 Datos"])
 
 # ==========================================
 # PESTAÑA 1: DASHBOARD
@@ -318,6 +378,11 @@ with tab_ofertas:
             texto_completo = _disp(row.get('Texto'))
             empresa = _disp(row.get('Empresa')) or _disp(row.get('Empresa Contacto'))
 
+            try:
+                deteccion_pct = float(row.get('Score', 0) or 0) * 100
+            except (ValueError, TypeError):
+                deteccion_pct = 0.0
+
             st.markdown(f'''
             <div class="post-card">
                 <h4>👤 {_disp(row.get("Autor"))} <span style="float:right; color:#00e676;">Prioridad: {row.get("Prioridad", 0):.2f}</span></h4>
@@ -328,6 +393,8 @@ with tab_ofertas:
             </div>
             ''', unsafe_allow_html=True)
 
+            st.progress(min(max(deteccion_pct / 100, 0.0), 1.0), text=f"🤖 % de detección del bot: {deteccion_pct:.0f}%")
+
             with st.expander("📄 Descripción completa", expanded=True):
                 st.write(texto_completo)
 
@@ -335,7 +402,7 @@ with tab_ofertas:
             if existing:
                 st.caption(f"✅ Ya clasificado como: **{classification_label(existing)}**")
             else:
-                c1, c2, c3, c4 = st.columns(4)
+                c1, c2, c3, c4, c5 = st.columns(5)
                 with c1:
                     if st.button("🏗️ Estructural", key=f"of_struct_{idx}", use_container_width=True, type="primary"):
                         classify_post(row.get("Texto", ""), True, True)
@@ -352,40 +419,140 @@ with tab_ofertas:
                     if st.button("🗑️ Basura / No es oferta", key=f"of_trash_{idx}", use_container_width=True):
                         classify_post(row.get("Texto", ""), False, False)
                         st.rerun()
+                with c5:
+                    if st.button("🚫 Descartar", key=f"of_discard_{idx}", use_container_width=True):
+                        classify_post(row.get("Texto", ""), False, False, discarded=True)
+                        st.rerun()
 
             st.markdown("---")
 
-    with st.expander("⚙️ Gestión de datos de entrenamiento"):
-        if github_sync_enabled():
-            st.caption("✅ Cada clasificación se guarda automáticamente en GitHub, así que tú y tu colega comparten el mismo progreso sin pasos manuales.")
+
+# ==========================================
+# PESTAÑA ENTRENAMIENTO: ESTADISTICAS + PALABRAS CLAVE
+# ==========================================
+with tab_train:
+    st.markdown("### 🤖 Entrenamiento del Bot")
+    st.write("Revisa cómo está aprendiendo el bot a detectar ofertas y ajusta las palabras clave que usa para clasificar.")
+
+    counts = {"Estructural": 0, "General": 0, "Postulante": 0, "Basura": 0, "Descartado": 0}
+    for item in st.session_state.training_data:
+        if item.get("discarded"):
+            counts["Descartado"] += 1
+        elif item.get("is_structural"):
+            counts["Estructural"] += 1
+        elif item.get("is_seeker"):
+            counts["Postulante"] += 1
+        elif item.get("is_job_offer"):
+            counts["General"] += 1
         else:
-            st.caption("⚠️ La sincronización con GitHub no está configurada: este progreso solo vive en esta sesión y se perderá al reiniciar la app.")
+            counts["Basura"] += 1
 
-        if len(st.session_state.training_data) > 0:
-            json_string = json.dumps(st.session_state.training_data, ensure_ascii=False, indent=2)
-            st.download_button(
-                label="⬇️ Descargar `training_data.json`",
-                file_name="training_data.json",
-                mime="application/json",
-                data=json_string
-            )
+    cc1, cc2, cc3, cc4, cc5 = st.columns(5)
+    cc1.metric("🏗️ Estructural", counts["Estructural"])
+    cc2.metric("✅ General", counts["General"])
+    cc3.metric("🙋 Postulante", counts["Postulante"])
+    cc4.metric("🗑️ Basura", counts["Basura"])
+    cc5.metric("🚫 Descartado", counts["Descartado"])
 
-        st.markdown("##### 🔄 Fusionar entrenamiento de un colega")
-        st.caption("Sube un `training_data.json` (descargado por tu colega u otra sesión) para fusionarlo con el progreso actual.")
-        uploaded_training = st.file_uploader("Subir training_data.json", type="json", key="training_uploader")
-        if uploaded_training is not None:
-            try:
-                incoming = json.load(uploaded_training)
-                existing_texts = {item.get("text", "") for item in st.session_state.training_data}
-                new_items = [item for item in incoming if item.get("text", "") not in existing_texts]
-                if new_items:
-                    st.session_state.training_data.extend(new_items)
-                    save_training_data(st.session_state.training_data)
-                    st.success(f"Se fusionaron {len(new_items)} clasificaciones nuevas. Total: {len(st.session_state.training_data)}.")
-                else:
-                    st.info("El archivo subido no contiene clasificaciones nuevas.")
-            except (json.JSONDecodeError, AttributeError):
-                st.error("El archivo subido no es un training_data.json válido.")
+    st.markdown("---")
+    st.subheader("📊 Distribución del % de detección actual")
+    if 'Score' in df.columns and not df['Score'].dropna().empty:
+        df_score = df.copy()
+        df_score['Detección %'] = pd.to_numeric(df_score['Score'], errors='coerce') * 100
+        fig_score = px.histogram(df_score, x='Detección %', nbins=20, color_discrete_sequence=['#448aff'])
+        st.plotly_chart(fig_score, use_container_width=True)
+        st.caption(f"Promedio actual: {df_score['Detección %'].mean():.1f}% | Validadas por IA: {(df['IA Validado'] == 'Sí').sum():,} de {len(df):,}")
+
+    st.markdown("---")
+    st.subheader("🔑 Palabras clave del detector")
+    st.caption("Estas palabras determinan el % de detección de cada post. Los cambios se aplicarán en la próxima pasada del bot.")
+
+    if 'keywords' not in st.session_state:
+        st.session_state.keywords = load_keywords()
+    keywords = st.session_state.keywords
+
+    col_kw1, col_kw2 = st.columns(2)
+    with col_kw1:
+        st.markdown(f"**✅ Positivas ({len(keywords.get('positive', []))})**")
+        pos_text = st.text_area("Una por línea:", value="\n".join(keywords.get('positive', [])), height=250, key="kw_pos")
+    with col_kw2:
+        st.markdown(f"**❌ Negativas ({len(keywords.get('negative', []))})**")
+        neg_text = st.text_area("Una por línea:", value="\n".join(keywords.get('negative', [])), height=250, key="kw_neg")
+
+    if st.button("💾 Guardar palabras clave"):
+        new_keywords = {
+            "positive": sorted({l.strip().lower() for l in pos_text.splitlines() if l.strip()}),
+            "negative": sorted({l.strip().lower() for l in neg_text.splitlines() if l.strip()}),
+        }
+        save_keywords(new_keywords)
+        st.session_state.keywords = new_keywords
+        st.success("Palabras clave actualizadas.")
+        st.rerun()
+
+    st.markdown("---")
+    st.subheader("💡 Sugerencias automáticas")
+    st.caption("Analiza tus clasificaciones (Estructural/General = positivo, Basura = negativo) y sugiere palabras clave nuevas que el bot todavía no usa.")
+
+    if st.button("🔍 Analizar clasificaciones"):
+        st.session_state.kw_suggestions = suggest_keywords(st.session_state.training_data, keywords)
+
+    suggestions = st.session_state.get("kw_suggestions")
+    if suggestions is not None:
+        if not suggestions["positive"] and not suggestions["negative"]:
+            st.info("No se encontraron patrones nuevos significativos (clasifica más posts en la pestaña Ofertas para mejorar la sugerencia).")
+        else:
+            sp1, sp2 = st.columns(2)
+            with sp1:
+                st.markdown("**Nuevas positivas sugeridas:**")
+                for term in suggestions["positive"]:
+                    st.write(f"- {term}")
+            with sp2:
+                st.markdown("**Nuevas negativas sugeridas:**")
+                for term in suggestions["negative"]:
+                    st.write(f"- {term}")
+            if st.button("✅ Aplicar sugerencias"):
+                merged = {
+                    "positive": sorted(set(keywords.get("positive", [])) | set(suggestions["positive"])),
+                    "negative": sorted(set(keywords.get("negative", [])) | set(suggestions["negative"])),
+                }
+                save_keywords(merged)
+                st.session_state.keywords = merged
+                st.session_state.kw_suggestions = None
+                st.success("Palabras clave actualizadas con las sugerencias.")
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("⚙️ Gestión de datos de entrenamiento")
+    if github_sync_enabled():
+        st.caption("✅ Cada clasificación se guarda automáticamente en GitHub, así que tú y tu colega comparten el mismo progreso sin pasos manuales.")
+    else:
+        st.caption("⚠️ La sincronización con GitHub no está configurada: este progreso solo vive en esta sesión y se perderá al reiniciar la app.")
+
+    if len(st.session_state.training_data) > 0:
+        json_string = json.dumps(st.session_state.training_data, ensure_ascii=False, indent=2)
+        st.download_button(
+            label="⬇️ Descargar `training_data.json`",
+            file_name="training_data.json",
+            mime="application/json",
+            data=json_string
+        )
+
+    st.markdown("##### 🔄 Fusionar entrenamiento de un colega")
+    st.caption("Sube un `training_data.json` (descargado por tu colega u otra sesión) para fusionarlo con el progreso actual.")
+    uploaded_training = st.file_uploader("Subir training_data.json", type="json", key="training_uploader")
+    if uploaded_training is not None:
+        try:
+            incoming = json.load(uploaded_training)
+            existing_texts = {item.get("text", "") for item in st.session_state.training_data}
+            new_items = [item for item in incoming if item.get("text", "") not in existing_texts]
+            if new_items:
+                st.session_state.training_data.extend(new_items)
+                save_training_data(st.session_state.training_data)
+                st.success(f"Se fusionaron {len(new_items)} clasificaciones nuevas. Total: {len(st.session_state.training_data)}.")
+            else:
+                st.info("El archivo subido no contiene clasificaciones nuevas.")
+        except (json.JSONDecodeError, AttributeError):
+            st.error("El archivo subido no es un training_data.json válido.")
 
 
 # ==========================================

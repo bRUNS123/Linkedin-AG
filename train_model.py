@@ -6,6 +6,9 @@ from collections import Counter
 KEYWORDS_FILE = 'job_keywords.json'
 TRAINING_DATA_FILE = 'training_data.json'
 
+# Stopwords básicas en español para ignorar ruido al analizar n-gramas
+STOPWORDS = {'de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'es', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'sí', 'porque', 'esta', 'entre', 'cuando', 'muy', 'sin', 'sobre', 'también', 'me', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'todos', 'uno', 'les', 'ni', 'contra', 'otros', 'ese', 'eso', 'ante', 'ellos', 'e', 'esto', 'mí', 'antes', 'algunos', 'qué', 'unos', 'yo', 'otro', 'otras', 'otra', 'él', 'tanto', 'esa', 'estos', 'mucho', 'quienes', 'nada', 'muchos', 'cual', 'poco', 'ella', 'estar', 'estas', 'algunas', 'algo', 'nosotros', 'mi', 'mis', 'tu', 'tus'}
+
 def normalize_text(text):
     text = text.lower()
     # Eliminar puntuación básica y caracteres especiales
@@ -50,13 +53,10 @@ def train():
     # Contadores de n-gramas
     pos_counts = Counter()
     neg_counts = Counter()
-    
-    # Stopwords básicas en español para ignorar ruido
-    stopwords = {'de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'es', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'sí', 'porque', 'esta', 'entre', 'cuando', 'muy', 'sin', 'sobre', 'también', 'me', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'todos', 'uno', 'les', 'ni', 'contra', 'otros', 'ese', 'eso', 'ante', 'ellos', 'e', 'esto', 'mí', 'antes', 'algunos', 'qué', 'unos', 'yo', 'otro', 'otras', 'otra', 'él', 'tanto', 'esa', 'estos', 'mucho', 'quienes', 'nada', 'muchos', 'cual', 'poco', 'ella', 'estar', 'estas', 'algunas', 'algo', 'nosotros', 'mi', 'mis', 'tu', 'tus'}
 
     def process_corpus(texts, counter):
         for text in texts:
-            words = [w for w in text.split() if w not in stopwords and len(w) > 2]
+            words = [w for w in text.split() if w not in STOPWORDS and len(w) > 2]
             # Unigramas
             counter.update(words)
             # Bigramas
