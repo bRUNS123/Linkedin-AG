@@ -163,7 +163,8 @@ class ScraperEngine:
 
     def log(self, msg):
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_queue.put(f"[{timestamp}] {msg}")
+        formatted = f"[{timestamp}] {msg}"
+        self.log_queue.put(formatted)
 
     def update_stats(self, **kwargs):
         self.stats.update(kwargs)
@@ -1244,6 +1245,16 @@ class DashboardApp:
             self.log_text.insert(END, msg)
         self.log_text.see(END)
         self.log_text.config(state=DISABLED)
+        
+        # Guardar en archivo para el dashboard central
+        try:
+            log_path = Path(__file__).parent / "scrap_log.txt"
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(msg)
+                if not msg.endswith("\n"):
+                    f.write("\n")
+        except Exception:
+            pass
 
     def _load_initial_stats(self):
         posts = load_json(LOCATIONS_FILE, [])

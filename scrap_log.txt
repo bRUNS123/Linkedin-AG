@@ -1,0 +1,24 @@
+[SISTEMA] Panel de control listo. 13226 posts en base de datos.
+[SISTEMA] Pipeline iniciado.
+[11:52:16] Iniciando navegador...
+[11:52:16] Iniciando navegador...
+[11:52:39] Sesion activa detectada.
+[11:52:39] --- CICLO #1 - 11:52:39 ---
+[11:52:39] === FASE 1: SCRAPING ===
+[11:52:39] Sesion activa detectada.
+[11:52:39] --- CICLO #1 - 11:52:39 ---
+[11:52:39] === FASE 1: SCRAPING ===
+[11:52:49]   Scroll 1: +3 nuevos (Total: 13286)
+[11:52:49]   Scroll 1: +3 nuevos (Total: 13286)
+[11:52:54]   Scroll 2: +1 nuevos (Total: 13287)
+[11:52:54]   Scroll 2: +1 nuevos (Total: 13287)
+[11:52:59]   Scroll 3: +1 nuevos (Total: 13288)
+[11:52:59]   Scroll 3: +1 nuevos (Total: 13288)
+[11:53:05]   Scroll 4: +1 nuevos (Total: 13289)
+[11:53:05]   Scroll 4: +1 nuevos (Total: 13289)
+[11:53:10]   Scroll 5: +2 nuevos (Total: 13291)
+[11:53:10]   Scroll 5: +2 nuevos (Total: 13291)
+[11:53:16]   Scroll 6: +2 nuevos (Total: 13293)
+[11:53:16]   Scroll 6: +2 nuevos (Total: 13293)
+[11:53:21]   Scroll 7: +2 nuevos (Total: 13295)
+[11:53:21]   Scroll 7: +2 nuevos (Total: 13295)

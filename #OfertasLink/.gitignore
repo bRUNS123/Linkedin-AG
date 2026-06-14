@@ -1,0 +1,31 @@
+# Chrome data
+chrome-data/
+
+# Archivos temporales
+total.txt
+filtro_laburo.txt
+*.log
+
+# Output files
+output/*.xlsx
+output/*.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Environment
+.env
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
